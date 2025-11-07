@@ -1,0 +1,32 @@
+repos:
+  # Hooks standar untuk kebersihan file umum
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.5.0 # Gunakan versi stabil terbaru
+    hooks:
+      - id: trailing-whitespace    # Menghapus spasi di akhir baris
+      - id: end-of-file-fixer      # Memastikan file diakhiri dengan satu baris baru
+      - id: check-yaml             # Memeriksa sintaks file YAML
+      - id: check-added-large-files # Mencegah penambahan file besar ke Git
+
+  # Hook untuk mengurutkan impor secara otomatis
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        name: isort (python)
+        args: ["--profile", "black"] # Menggunakan profil yang kompatibel dengan Black
+
+  # Hook untuk pemformatan kode otomatis
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        language_version: python3.11 # Sesuaikan dengan versi Python proyek
+
+  # Hook untuk pemeriksaan gaya dan kesalahan logika (linter)
+  - repo: https://github.com/pycqa/flake8
+    rev: 7.0.0
+    hooks:
+      - id: flake8
+        # Konfigurasi tambahan mungkin diperlukan di.flake8 atau pyproject.toml
+        # untuk memastikan kompatibilitas penuh dengan Black.

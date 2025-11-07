@@ -1,0 +1,97 @@
+"""
+Main FastAPI application untuk bacterial GAN augmentation API.
+
+API ini harus menyediakan endpoints untuk:
+1. Model inference (generate synthetic images)
+2. Model management (list available models, model info)
+3. Health checks dan monitoring
+4. File upload untuk custom generation
+5. Evaluation results retrieval
+6. Real-time generation progress tracking
+"""
+
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import uvicorn
+import logging
+from pathlib import Path
+import sys
+
+# Add src to path
+sys.path.append(str(Path(__file__).parent.parent / "src"))
+
+from config import settings
+from app.api.router import api_router
+from app.core.logging_config import setup_api_logging
+from app.core.dependencies import get_model_registry
+
+# Initialize FastAPI app
+app = FastAPI(
+    title=settings.app.title,
+    version=settings.app.version,
+    description="API untuk generating synthetic bacterial images menggunakan trained GAN models",
+    docs_url="/docs",
+    redoc_url="/redoc"
+)
+
+# Setup CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Configure appropriately untuk production
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include API router
+app.include_router(api_router, prefix="/api/v1")
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize services saat application startup."""
+    setup_api_logging()
+    logging.info("Bacterial GAN API starting up...")
+    
+    # Initialize model registry
+    # Load available models
+    # Setup monitoring
+    
+    logging.info("API startup completed")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup resources saat application shutdown."""
+    logging.info("Bacterial GAN API shutting down...")
+    # Cleanup model instances
+    # Close database connections
+    # Save any pending data
+
+@app.get("/")
+async def root():
+    """Root endpoint dengan basic API information."""
+    return {
+        "message": "Bacterial GAN Augmentation API",
+        "version": settings.app.version,
+        "status": "running",
+        "docs": "/docs"
+    }
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint untuk monitoring."""
+    return {
+        "status": "healthy",
+        "version": settings.app.version,
+        "models_available": True,  # Check actual model availability
+        "database_connected": True  # Check database connection
+    }
+
+if __name__ == "__main__":
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info"
+    )

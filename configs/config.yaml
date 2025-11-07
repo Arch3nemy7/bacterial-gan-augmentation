@@ -1,0 +1,19 @@
+app:
+  title: "Bacterial GAN Augmentation API"
+  version: "0.1.0"
+
+data:
+  raw_data_dir: "data/01_raw"
+  processed_data_dir: "data/02_processed"
+  synthetic_data_dir: "data/03_synthetic"
+  expert_testing_set_path: "data/04_expert_testing"
+
+training:
+  image_size: 128  # Optimized for GTX 1650 (was 256)
+  batch_size: 8    # Reduced for GPU memory (was 16)
+  epochs: 200
+  learning_rate: 0.0002
+  beta1: 0.5
+
+evaluation:
+  num_images_for_expert_panel: 25
