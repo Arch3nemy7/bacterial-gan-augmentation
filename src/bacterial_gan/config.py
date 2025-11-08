@@ -29,6 +29,10 @@ class TrainingConfig(BaseModel):
     epochs: int = 200
     learning_rate: float = 0.0002
     beta1: float = 0.5
+    latent_dim: int = 100
+    loss_type: str = "wgan-gp"
+    n_critic: int = 5
+    lambda_gp: float = 10.0
 
 class EvaluationConfig(BaseModel):
     """Konfigurasi untuk proses evaluasi."""

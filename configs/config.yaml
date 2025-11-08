@@ -14,6 +14,10 @@ training:
   epochs: 200
   learning_rate: 0.0002
   beta1: 0.5
+  latent_dim: 100  # Dimension of noise vector
+  loss_type: "wgan-gp"  # Options: "wgan-gp", "lsgan", "vanilla"
+  n_critic: 5  # Number of discriminator updates per generator update
+  lambda_gp: 10.0  # Gradient penalty coefficient for WGAN-GP
 
 evaluation:
   num_images_for_expert_panel: 25

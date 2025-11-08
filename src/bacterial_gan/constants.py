@@ -29,6 +29,14 @@ class BacterialClass(Enum):
     GRAM_POSITIVE = "gram_positive"
     GRAM_NEGATIVE = "gram_negative"
 
+# Class labels mapping
+CLASS_LABELS = {
+    0: "gram_positive",
+    1: "gram_negative"
+}
+
+CLASS_NAMES = ["Gram-Positive", "Gram-Negative"]
+
 # Model parameters
 DEFAULT_IMAGE_SIZE = 256
 DEFAULT_BATCH_SIZE = 16

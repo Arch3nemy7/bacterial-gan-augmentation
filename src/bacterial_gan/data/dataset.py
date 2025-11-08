@@ -47,7 +47,7 @@ class GramStainDataset:
         image_paths = []
         labels = []
 
-        for class_name, class_idx in CLASS_LABELS.items():
+        for class_idx, class_name in CLASS_LABELS.items():
             class_dir = self.data_path / class_name
 
             if not class_dir.exists():

@@ -351,10 +351,14 @@ def gradient_penalty(discriminator, real_images, fake_images, class_labels, lamb
     Returns:
         Gradient penalty value (scalar)
     """
+    # Cast to float32 for mixed precision training compatibility
+    real_images = tf.cast(real_images, tf.float32)
+    fake_images = tf.cast(fake_images, tf.float32)
+
     batch_size = tf.shape(real_images)[0]
 
     # Random interpolation weight for each sample in batch
-    alpha = tf.random.uniform([batch_size, 1, 1, 1], 0.0, 1.0)
+    alpha = tf.random.uniform([batch_size, 1, 1, 1], 0.0, 1.0, dtype=tf.float32)
 
     # Interpolated images: x_hat = alpha * real + (1 - alpha) * fake
     interpolated = alpha * real_images + (1 - alpha) * fake_images
