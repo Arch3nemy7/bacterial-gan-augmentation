@@ -80,59 +80,162 @@ class GramStainDataset:
         return image, label
 
     def _augment_image(self, image: tf.Tensor, label: int):
-        """Apply data augmentation."""
-        if self.augment and self.split == "train":
-            # Random flip
-            image = tf.image.random_flip_left_right(image)
+        """
+        Apply aggressive geometric augmentation for bacterial images.
 
-            # Random rotation (small angles)
+        NOTE: Color augmentation is deliberately EXCLUDED because Gram stain colors are
+        diagnostic (pink=gram-positive, blue=gram-negative). Changing colors would
+        confuse the GAN about correct stain appearance.
+
+        Implements geometric augmentations to maximize dataset diversity:
+        - Geometric: flips, 90° rotations, zoom/crop
+        - Noise: Gaussian noise to simulate imaging artifacts (preserves color)
+        """
+        if self.augment and self.split == "train":
+            # === GEOMETRIC AUGMENTATIONS ===
+
+            # Random horizontal and vertical flips
+            # Bacteria can appear in any orientation
+            image = tf.image.random_flip_left_right(image)
+            image = tf.image.random_flip_up_down(image)
+
+            # Random 90° rotation (0, 90, 180, 270 degrees)
+            # Simulates different microscope orientations
             image = tf.image.rot90(
                 image, k=tf.random.uniform(shape=[], minval=0, maxval=4, dtype=tf.int32)
             )
 
-            # Random brightness/contrast
-            image = tf.image.random_brightness(image, max_delta=0.1)
-            image = tf.image.random_contrast(image, lower=0.9, upper=1.1)
+            # Random zoom (0.85x to 1.15x) via resize + crop/pad
+            # Simulates different magnification levels and focal planes
+            zoom_factor = tf.random.uniform([], minval=0.85, maxval=1.15)
+            image_shape = tf.shape(image)
+            h, w = image_shape[0], image_shape[1]
 
-            # Clip to valid range
+            # Calculate new size after zoom
+            new_h = tf.cast(tf.cast(h, tf.float32) * zoom_factor, tf.int32)
+            new_w = tf.cast(tf.cast(w, tf.float32) * zoom_factor, tf.int32)
+
+            # Resize then crop or pad back to original size
+            image = tf.image.resize(image, [new_h, new_w], method='bilinear')
+            image = tf.image.resize_with_crop_or_pad(image, h, w)
+
+            # Random translation (shift image up/down/left/right)
+            # Simulates different cell positions in field of view
+            max_shift = 10  # pixels
+            shift_h = tf.random.uniform([], minval=-max_shift, maxval=max_shift, dtype=tf.int32)
+            shift_w = tf.random.uniform([], minval=-max_shift, maxval=max_shift, dtype=tf.int32)
+            image = tf.roll(image, shift=[shift_h, shift_w], axis=[0, 1])
+
+            # === NOISE AUGMENTATION ===
+
+            # Add Gaussian noise to simulate imaging artifacts
+            # stddev=0.02 in [-1,1] space ≈ 2.5 intensity units in [0,255]
+            # This preserves color while adding realistic microscopy noise
+            noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=0.02, dtype=tf.float32)
+            image = image + noise
+
+            # Clip to valid range [-1, 1]
             image = tf.clip_by_value(image, -1.0, 1.0)
+
+            # NOTE: For continuous rotation (0-360°), install tensorflow-addons:
+            # import tensorflow_addons as tfa
+            # angle = tf.random.uniform([], minval=0, maxval=2*np.pi)
+            # image = tfa.image.rotate(image, angle, interpolation='bilinear')
 
         return image, label
 
-    def get_tf_dataset(self, batch_size: int = 32, shuffle: bool = True) -> tf.data.Dataset:
+    def get_tf_dataset(self, batch_size: int = 32, shuffle: bool = True, balance_classes: bool = False) -> tf.data.Dataset:
         """
-        Create TensorFlow dataset.
+        Create TensorFlow dataset with optional class balancing.
 
         Args:
             batch_size: Batch size
             shuffle: Whether to shuffle data
+            balance_classes: If True, ensures balanced class distribution in batches (for training)
 
         Returns:
             tf.data.Dataset yielding (images, labels)
         """
-        # Create dataset from paths
-        path_ds = tf.data.Dataset.from_tensor_slices(
-            ([str(p) for p in self.image_paths], self.labels)
-        )
+        if balance_classes and self.split == "train":
+            # Create class-balanced dataset by interleaving class-specific datasets
+            datasets_by_class = []
 
-        if shuffle:
-            path_ds = path_ds.shuffle(buffer_size=1000, reshuffle_each_iteration=True)
+            # Get unique classes
+            unique_labels = sorted(set(self.labels))
 
-        # Load and preprocess
-        dataset = path_ds.map(
-            self._load_and_preprocess_image,
-            num_parallel_calls=tf.data.AUTOTUNE
-        )
+            for class_label in unique_labels:
+                # Filter paths for this class
+                class_indices = [i for i, label in enumerate(self.labels) if label == class_label]
+                class_paths = [self.image_paths[i] for i in class_indices]
+                class_labels_list = [self.labels[i] for i in class_indices]
 
-        # Apply augmentation
-        dataset = dataset.map(
-            self._augment_image,
-            num_parallel_calls=tf.data.AUTOTUNE
-        )
+                # Create dataset for this class
+                class_ds = tf.data.Dataset.from_tensor_slices(
+                    ([str(p) for p in class_paths], class_labels_list)
+                )
 
-        # Batch and prefetch
-        dataset = dataset.batch(batch_size, drop_remainder=True)
-        dataset = dataset.prefetch(tf.data.AUTOTUNE)
+                # Load and preprocess
+                class_ds = class_ds.map(
+                    self._load_and_preprocess_image,
+                    num_parallel_calls=tf.data.AUTOTUNE
+                )
+
+                # Cache and shuffle
+                class_ds = class_ds.cache()
+                if shuffle:
+                    class_ds = class_ds.shuffle(buffer_size=len(class_paths), reshuffle_each_iteration=True)
+
+                # Repeat to ensure enough samples
+                class_ds = class_ds.repeat()
+
+                # Apply augmentation
+                class_ds = class_ds.map(
+                    self._augment_image,
+                    num_parallel_calls=tf.data.AUTOTUNE
+                )
+
+                datasets_by_class.append(class_ds)
+
+            # Interleave datasets to create balanced batches
+            # Each batch will have equal samples from each class
+            dataset = tf.data.Dataset.sample_from_datasets(
+                datasets_by_class,
+                weights=[1.0 / len(datasets_by_class)] * len(datasets_by_class)
+            )
+
+            # Batch and prefetch
+            dataset = dataset.batch(batch_size, drop_remainder=True)
+            dataset = dataset.prefetch(tf.data.AUTOTUNE)
+
+        else:
+            # Original unbalanced dataset creation
+            # Create dataset from paths
+            path_ds = tf.data.Dataset.from_tensor_slices(
+                ([str(p) for p in self.image_paths], self.labels)
+            )
+
+            # Load and preprocess (Resize, Normalize)
+            dataset = path_ds.map(
+                self._load_and_preprocess_image,
+                num_parallel_calls=tf.data.AUTOTUNE
+            )
+
+            # Cache dataset in memory for faster training
+            # This avoids reading/decoding images from disk every epoch
+            dataset = dataset.cache()
+
+            if shuffle:
+                dataset = dataset.shuffle(buffer_size=1000, reshuffle_each_iteration=True)
+
+            # Apply augmentation
+            dataset = dataset.map(
+                self._augment_image,
+                num_parallel_calls=tf.data.AUTOTUNE
+            )
+
+            # Batch and prefetch
+            dataset = dataset.batch(batch_size, drop_remainder=True)
+            dataset = dataset.prefetch(tf.data.AUTOTUNE)
 
         return dataset
 
@@ -171,7 +274,8 @@ def create_datasets(
 
         datasets[split] = dataset.get_tf_dataset(
             batch_size=batch_size,
-            shuffle=(split == 'train')
+            shuffle=(split == 'train'),
+            balance_classes=(split == 'train')  # Enable class balancing for training
         )
 
     return datasets

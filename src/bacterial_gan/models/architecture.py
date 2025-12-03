@@ -118,7 +118,7 @@ class SelfAttention(layers.Layer):
 
 
 # ============================================================================
-# GENERATOR (U-Net for 128x128 images, optimized for GTX 1650)
+# GENERATOR (U-Net for 128x128 or 256x256 images)
 # ============================================================================
 
 def build_generator(
@@ -128,18 +128,19 @@ def build_generator(
     channels: int = 3,
 ) -> keras.Model:
     """
-    Build conditional U-Net generator optimized for GTX 1650 (4GB VRAM).
+    Build conditional U-Net generator with dynamic image size support.
 
     Architecture:
     - Memory-efficient design with smaller filter counts
     - Skip connections for better gradient flow
     - Batch normalization for training stability
     - Self-attention at bottleneck for global coherence
+    - Dynamic upsampling based on target image_size
 
     Args:
         latent_dim: Dimension of latent noise vector (default: 100)
         num_classes: Number of classes for conditioning (default: 2)
-        image_size: Output image size (default: 128 for GTX 1650)
+        image_size: Output image size - 128 or 256 (default: 128)
         channels: Number of output channels (default: 3 for RGB)
 
     Returns:
@@ -157,39 +158,95 @@ def build_generator(
     combined = layers.Concatenate()([noise_input, class_embedding])
 
     # ========== INITIAL PROJECTION ==========
-    # Project to 8x8x128 feature map
-    x = layers.Dense(8 * 8 * 128, use_bias=False)(combined)
+    # Project to 8x8x192 feature map (increased capacity)
+    x = layers.Dense(8 * 8 * 192, use_bias=False)(combined)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
-    x = layers.Reshape((8, 8, 128))(x)
+    x = layers.Reshape((8, 8, 192))(x)
 
-    # ========== UPSAMPLING PATH ==========
-    # 8x8x128 -> 16x16x128
-    x = layers.Conv2DTranspose(128, 4, strides=2, padding='same', use_bias=False)(x)
+    # ========== SELF-ATTENTION at 8x8 (memory-efficient) ==========
+    # Self-attention at 8x8 creates only 64x64 attention matrix
+    # Much more memory-friendly than 4096x4096 at 64x64 resolution
+    # Provides global coherence while fitting in GTX 1650 memory
+    x = SelfAttention(192)(x)
+
+    skip_8x8 = x  # Save for potential skip connection
+
+    # ========== UPSAMPLING PATH WITH SKIP CONNECTIONS (U-Net style) ==========
+    # 8x8x192 -> 16x16x192 (UpSampling + Conv2D to avoid checkerboard artifacts)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = layers.Conv2D(192, 3, padding='same', use_bias=False)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(0.2)(x)
+    skip_16x16 = x  # Save for skip connection
+
+    # 16x16x192 -> 32x32x192 (UpSampling + Conv2D)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = layers.Conv2D(192, 3, padding='same', use_bias=False)(x)
+    x = layers.BatchNormalization()(x)
+    x = layers.LeakyReLU(0.2)(x)
+    skip_32x32 = x  # Save for skip connection
+
+    # 32x32x192 -> 64x64x192 (UpSampling + Conv2D)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = layers.Conv2D(192, 3, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
 
-    # 16x16x128 -> 32x32x128
-    x = layers.Conv2DTranspose(128, 4, strides=2, padding='same', use_bias=False)(x)
+    # Add skip connection from 32x32 (upsampled to 64x64)
+    skip_32x32_up = layers.UpSampling2D(size=2, interpolation='bilinear')(skip_32x32)
+    skip_32x32_up = layers.Conv2D(96, 3, padding='same', use_bias=False)(skip_32x32_up)
+    skip_32x32_up = layers.BatchNormalization()(skip_32x32_up)
+    skip_32x32_up = layers.LeakyReLU(0.2)(skip_32x32_up)
+    x = layers.Concatenate()([x, skip_32x32_up])  # 64x64x(192+96)=288
+
+    # Process concatenated features
+    x = layers.Conv2D(192, 3, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
 
-    # 32x32x128 -> 64x64x128
-    x = layers.Conv2DTranspose(128, 4, strides=2, padding='same', use_bias=False)(x)
+    # ========== SELF-ATTENTION at 64x64 (DISABLED due to OOM on GTX 1650) ==========
+    # Self-attention creates 4096x4096 attention matrix (64x64 spatial positions)
+    # With batch_size=16, this requires ~1GB memory - too much for GTX 1650
+    # if image_size == 128:
+    #     x = SelfAttention(192)(x)
+
+    # ========== UPSAMPLING TO 128x128 WITH SKIP CONNECTION ==========
+    # 64x64x192 -> 128x128x64 (UpSampling + Conv2D)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = layers.Conv2D(64, 3, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
 
-    # ========== SELF-ATTENTION at 64x64 ==========
-    x = SelfAttention(128)(x)
+    # Add skip connection from 16x16 (upsampled 3 times to 128x128: 16→32→64→128)
+    skip_16x16_up = layers.UpSampling2D(size=2, interpolation='bilinear')(skip_16x16)  # 16→32
+    skip_16x16_up = layers.Conv2D(96, 3, padding='same', use_bias=False)(skip_16x16_up)
+    skip_16x16_up = layers.BatchNormalization()(skip_16x16_up)
+    skip_16x16_up = layers.LeakyReLU(0.2)(skip_16x16_up)
+    skip_16x16_up = layers.UpSampling2D(size=2, interpolation='bilinear')(skip_16x16_up)  # 32→64
+    skip_16x16_up = layers.Conv2D(48, 3, padding='same', use_bias=False)(skip_16x16_up)
+    skip_16x16_up = layers.BatchNormalization()(skip_16x16_up)
+    skip_16x16_up = layers.LeakyReLU(0.2)(skip_16x16_up)
+    skip_16x16_up = layers.UpSampling2D(size=2, interpolation='bilinear')(skip_16x16_up)  # 64→128
+    skip_16x16_up = layers.Conv2D(32, 3, padding='same', use_bias=False)(skip_16x16_up)
+    skip_16x16_up = layers.BatchNormalization()(skip_16x16_up)
+    skip_16x16_up = layers.LeakyReLU(0.2)(skip_16x16_up)
+    x = layers.Concatenate()([x, skip_16x16_up])  # 128x128x(64+32)=96
 
-    # ========== FINAL UPSAMPLING ==========
-    # 64x64x128 -> 128x128x64
-    x = layers.Conv2DTranspose(64, 4, strides=2, padding='same', use_bias=False)(x)
+    # Process concatenated features
+    x = layers.Conv2D(64, 3, padding='same', use_bias=False)(x)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
+
+    # ========== CONDITIONAL UPSAMPLING FOR 256x256 ==========
+    if image_size == 256:
+        # 128x128x64 -> 256x256x64 (UpSampling + Conv2D)
+        x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+        x = layers.Conv2D(64, 3, padding='same', use_bias=False)(x)
+        x = layers.BatchNormalization()(x)
+        x = layers.LeakyReLU(0.2)(x)
 
     # ========== OUTPUT ==========
-    # 128x128x64 -> 128x128x3
     output = layers.Conv2D(channels, 7, padding='same', activation='tanh', name='output')(x)
 
     model = keras.Model(
@@ -202,7 +259,7 @@ def build_generator(
 
 
 # ============================================================================
-# DISCRIMINATOR (PatchGAN optimized for GTX 1650)
+# DISCRIMINATOR (PatchGAN for 128x128 or 256x256 images)
 # ============================================================================
 
 def build_discriminator(
@@ -212,7 +269,7 @@ def build_discriminator(
     use_spectral_norm: bool = True,
 ) -> keras.Model:
     """
-    Build conditional PatchGAN discriminator optimized for GTX 1650.
+    Build conditional PatchGAN discriminator with dynamic image size support.
 
     Architecture:
     - Memory-efficient with smaller filter counts
@@ -221,7 +278,7 @@ def build_discriminator(
     - PatchGAN output for local texture discrimination
 
     Args:
-        image_size: Input image size (default: 128)
+        image_size: Input image size - 128 or 256 (default: 128)
         channels: Number of input channels (default: 3)
         num_classes: Number of classes (default: 2)
         use_spectral_norm: Whether to use spectral normalization (default: True)
@@ -233,8 +290,12 @@ def build_discriminator(
     image_input = layers.Input(shape=(image_size, image_size, channels), name='image')
     class_input = layers.Input(shape=(1,), dtype='int32', name='class_label')
 
-    # Embed class label and broadcast to image spatial dimensions
-    class_embedding = layers.Embedding(num_classes, image_size * image_size)(class_input)
+    # Embed class label to a reasonable size (100 dims instead of image_size^2)
+    class_embedding = layers.Embedding(num_classes, 100)(class_input)
+    class_embedding = layers.Flatten()(class_embedding)  # [B, 100]
+
+    # Expand and tile to spatial dimensions [B, 100] -> [B, H, W, 1]
+    class_embedding = layers.Dense(image_size * image_size)(class_embedding)
     class_embedding = layers.Reshape((image_size, image_size, 1))(class_embedding)
 
     # Concatenate image with class channel
@@ -250,7 +311,7 @@ def build_discriminator(
 
         x = conv(x)
         x = layers.LeakyReLU(0.2)(x)
-        x = layers.Dropout(0.3)(x)
+        # Dropout removed - Spectral Normalization + Gradient Penalty provide sufficient regularization
         return x
 
     # 128x128x4 -> 64x64x64
@@ -262,8 +323,8 @@ def build_discriminator(
     # 32x32x128 -> 16x16x256
     x = conv_block(x, 256, use_sn=use_spectral_norm)
 
-    # 16x16x256 -> 8x8x512
-    x = conv_block(x, 512, use_sn=use_spectral_norm)
+    # 16x16x256 -> 8x8x384 (increased to better balance with generator capacity)
+    x = conv_block(x, 384, use_sn=use_spectral_norm)
 
     # ========== PATCHGAN OUTPUT ==========
     # Output: 8x8x1 patch predictions (no activation for WGAN)

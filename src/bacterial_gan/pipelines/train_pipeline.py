@@ -78,20 +78,33 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         resume_from_checkpoint: Path to checkpoint to resume from (optional)
     """
     print("=" * 80)
-    print("BACTERIAL GAN TRAINING PIPELINE")
+    print("🧬 BACTERIAL GAN TRAINING PIPELINE")
     print("=" * 80)
     print()
 
-    # Set MLflow experiment
-    mlflow.set_experiment("Bacterial GAN Augmentation")
+    # Set MLflow experiment - restore if deleted
+    experiment_name = "Bacterial GAN Augmentation"
+    try:
+        mlflow.set_experiment(experiment_name)
+    except mlflow.exceptions.MlflowException as e:
+        if "deleted" in str(e).lower():
+            # Restore the deleted experiment
+            client = mlflow.tracking.MlflowClient()
+            experiment = client.get_experiment_by_name(experiment_name)
+            if experiment and experiment.lifecycle_stage == "deleted":
+                print(f"🔄 Restoring deleted experiment: {experiment_name}")
+                client.restore_experiment(experiment.experiment_id)
+                mlflow.set_experiment(experiment_name)
+        else:
+            raise
 
     with mlflow.start_run() as run:
         run_id = run.info.run_id
-        print(f"MLflow Run ID: {run_id}")
+        print(f"📊 MLflow Run ID: {run_id}")
         print()
 
         # Log configuration parameters
-        print("Logging configuration to MLflow...")
+        print("📝 Logging configuration to MLflow...")
         mlflow.log_params({
             "image_size": settings.training.image_size,
             "batch_size": settings.training.batch_size,
@@ -109,7 +122,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         })
 
         # Initialize GAN
-        print("Initializing Conditional GAN...")
+        print("🏗️  Initializing Conditional GAN...")
         print()
         gan = ConditionalGAN(
             latent_dim=settings.training.latent_dim,
@@ -128,17 +141,18 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         # Resume from checkpoint if specified
         start_epoch = 0
         if resume_from_checkpoint:
-            print(f"Resuming from checkpoint: {resume_from_checkpoint}")
+            print(f"⏸️  Resuming from checkpoint: {resume_from_checkpoint}")
             checkpoint = gan.load_checkpoint(resume_from_checkpoint)
             start_epoch = checkpoint['epoch'] + 1
             print()
 
         # Load dataset
-        print("Loading dataset...")
+        print("📂 Loading dataset...")
         processed_data_path = Path(settings.data.processed_data_dir) / "train"
 
         # Try to load real dataset, fall back to dummy if not available
         train_dataset = None
+        num_batches = None
         if processed_data_path.exists():
             try:
                 dataset = GramStainDataset(
@@ -151,7 +165,9 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                     batch_size=settings.training.batch_size,
                     shuffle=True
                 )
-                print(f"✅ Loaded dataset from {processed_data_path}")
+                # Calculate number of batches (drop_remainder=True in dataset)
+                num_batches = dataset.num_samples // settings.training.batch_size
+                print(f"✅ Loaded {dataset.num_samples} images from {processed_data_path}")
             except (ValueError, FileNotFoundError) as e:
                 print(f"⚠️  Could not load real dataset: {e}")
                 train_dataset = None
@@ -162,10 +178,10 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             print(f"   Expected path: {processed_data_path}")
             print()
             print("   To use real data:")
-            print("   1. Add raw images to data/01_raw/gram_positive/ and data/01_raw/gram_negative/")
-            print("   2. Run: poetry run python scripts/prepare_data.py")
+            print("   1️⃣  Add raw images to data/01_raw/gram_positive/ and data/01_raw/gram_negative/")
+            print("   2️⃣  Run: poetry run python scripts/prepare_data.py")
             print()
-            print("   For now, creating DUMMY dataset for testing...")
+            print("   Creating DUMMY dataset for testing...")
             print()
 
             # Create dummy dataset for testing
@@ -173,6 +189,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                 batch_size=settings.training.batch_size,
                 image_size=settings.training.image_size
             )
+            num_batches = 10  # Hardcoded for dummy dataset
 
         print()
 
@@ -184,7 +201,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
 
         # Training loop
         print("=" * 80)
-        print("STARTING TRAINING")
+        print("🚀 STARTING TRAINING")
         print("=" * 80)
         print()
 
@@ -198,7 +215,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             pbar = tqdm(
                 enumerate(train_dataset),
                 desc=f"Epoch {epoch+1}/{settings.training.epochs}",
-                total=len(list(train_dataset)),
+                total=num_batches,
                 ncols=100
             )
 
@@ -231,23 +248,23 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
 
             # Print epoch summary
             print()
-            print(f"Epoch {epoch+1} Summary:")
-            print(f"  Generator Loss: {gen_loss:.4f}")
-            print(f"  Discriminator Loss: {disc_loss:.4f}")
-            print(f"  Gradient Penalty: {gp:.4f}")
-            print(f"  Time: {epoch_time:.2f}s")
+            print(f"📈 Epoch {epoch+1} Summary:")
+            print(f"   🎯 Generator Loss: {gen_loss:.4f}")
+            print(f"   🎯 Discriminator Loss: {disc_loss:.4f}")
+            print(f"   🎯 Gradient Penalty: {gp:.4f}")
+            print(f"   ⏱️  Time: {epoch_time:.2f}s")
             print()
 
-            # Save sample images every 10 epochs (4 samples for GPU memory constraints)
-            if (epoch + 1) % 10 == 0 or epoch == 0:
-                print(f"Generating sample images...")
+            # Save sample images every N epochs (4 samples for GPU memory constraints)
+            if (epoch + 1) % settings.training.sample_interval == 0 or epoch == 0:
+                print(f"🎨 Generating sample images...")
                 sample_path = save_sample_images(gan, epoch + 1, samples_dir, num_samples=4)
                 mlflow.log_artifact(sample_path, "samples")
                 print(f"✅ Samples saved to {sample_path}")
                 print()
 
-            # Save checkpoint every 50 epochs
-            if (epoch + 1) % 50 == 0:
+            # Save checkpoint every N epochs
+            if (epoch + 1) % settings.training.checkpoint_interval == 0:
                 checkpoint_path = models_dir / f"checkpoint_epoch_{epoch+1:04d}.npy"
                 gan.save_checkpoint(
                     str(checkpoint_path),
@@ -263,12 +280,12 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
 
         # Training complete
         print("=" * 80)
-        print("TRAINING COMPLETE!")
+        print("✅ TRAINING COMPLETE!")
         print("=" * 80)
         print()
 
         # Save final generator model
-        print("Saving final generator model...")
+        print("💾 Saving final generator model...")
         final_model_path = models_dir / "generator_final.keras"
         gan.save_generator(str(final_model_path))
 
@@ -280,24 +297,24 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         )
 
         # Generate final samples (8 samples for GPU memory)
-        print("Generating final sample images...")
+        print("🎨 Generating final sample images...")
         final_sample_path = save_sample_images(gan, settings.training.epochs, samples_dir, num_samples=8)
         mlflow.log_artifact(final_sample_path, "final_samples")
 
         print()
         print("=" * 80)
-        print("✅ TRAINING PIPELINE COMPLETE!")
+        print("🎉 TRAINING PIPELINE COMPLETED SUCCESSFULLY!")
         print("=" * 80)
         print()
-        print(f"MLflow Run ID: {run_id}")
-        print(f"Generator model: {final_model_path}")
-        print(f"Samples directory: {samples_dir}")
+        print(f"📊 MLflow Run ID: {run_id}")
+        print(f"🧠 Generator model: {final_model_path}")
+        print(f"🖼️  Samples directory: {samples_dir}")
         print()
-        print("To view results:")
-        print(f"  mlflow ui")
+        print("📈 To view results:")
+        print(f"   mlflow ui")
         print()
-        print("To generate synthetic data:")
-        print(f"  bacterial-gan generate-data --run-id {run_id} --num-images 1000")
+        print("🎨 To generate synthetic data:")
+        print(f"   bacterial-gan generate-data --run-id {run_id} --num-images 1000")
         print()
 
 

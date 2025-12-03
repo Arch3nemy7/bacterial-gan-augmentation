@@ -19,9 +19,16 @@ def create_data_splits(
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
     random_seed: int = 42,
+    target_size: int = 128,
+    apply_normalization: bool = True,
+    macenko_io: int = 240,
+    macenko_alpha: float = 1.0,
+    macenko_beta: float = 0.15,
 ) -> None:
     """
-    Split raw data into train/val/test sets with stratified sampling.
+    Split raw data into train/val/test sets with preprocessing.
+
+    Applies Macenko color normalization and resizes images before splitting.
 
     Args:
         data_config: Data configuration
@@ -29,6 +36,11 @@ def create_data_splits(
         val_ratio: Validation set ratio
         test_ratio: Test set ratio
         random_seed: Random seed for reproducibility
+        target_size: Target image size (width and height)
+        apply_normalization: Whether to apply Macenko normalization
+        macenko_io: Background light intensity for Macenko
+        macenko_alpha: Percentile for angle calculation in Macenko
+        macenko_beta: Optical density threshold for Macenko
     """
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6, "Ratios must sum to 1"
 
@@ -37,15 +49,22 @@ def create_data_splits(
 
     # Create split directories
     for split in ['train', 'val', 'test']:
-        for class_name in CLASS_LABELS.keys():
+        for class_name in CLASS_LABELS.values():
             (processed_path / split / class_name).mkdir(parents=True, exist_ok=True)
 
+    # Note: Macenko normalization uses a fixed reference stain matrix (no reference image needed)
+    if apply_normalization:
+        print("\nMacenko color normalization will be applied using fixed reference stain matrix.")
+
     # Process each class
-    for class_name in CLASS_LABELS.keys():
+    total_processed = 0
+    total_failed = 0
+
+    for class_name in CLASS_LABELS.values():
         class_dir = raw_path / class_name
 
         if not class_dir.exists():
-            print(f"Warning: {class_dir} does not exist. Skipping.")
+            print(f"\nWarning: {class_dir} does not exist. Skipping.")
             continue
 
         # Get all image files
@@ -54,10 +73,10 @@ def create_data_splits(
             image_files.extend(list(class_dir.glob(ext)))
 
         if len(image_files) == 0:
-            print(f"Warning: No images found in {class_dir}")
+            print(f"\nWarning: No images found in {class_dir}")
             continue
 
-        print(f"Processing {len(image_files)} images for class '{class_name}'...")
+        print(f"\nProcessing {len(image_files)} images for class '{class_name}'...")
 
         # Split data
         train_files, temp_files = train_test_split(
@@ -72,7 +91,7 @@ def create_data_splits(
             random_state=random_seed
         )
 
-        # Copy files to respective directories
+        # Process and save files to respective directories
         splits = {
             'train': train_files,
             'val': val_files,
@@ -80,12 +99,65 @@ def create_data_splits(
         }
 
         for split_name, files in splits.items():
-            print(f"  {split_name}: {len(files)} images")
-            for src_file in files:
-                dst_file = processed_path / split_name / class_name / src_file.name
-                shutil.copy2(src_file, dst_file)
+            print(f"  {split_name}: {len(files)} images", end='', flush=True)
+            processed = 0
+            failed = 0
 
-    print("Data splitting complete!")
+            for src_file in files:
+                try:
+                    # Load image
+                    img = Image.open(src_file).convert('RGB')
+                    img_array = np.array(img)
+
+                    # Apply Macenko normalization if requested
+                    if apply_normalization:
+                        try:
+                            img_array = normalize_macenko(
+                                img_array,
+                                Io=macenko_io,
+                                alpha=macenko_alpha,
+                                beta=macenko_beta
+                            )
+                        except Exception as e:
+                            print(f"\n    Warning: Macenko normalization failed for {src_file.name}: {e}")
+                            # Continue with unnormalized image
+
+                    # Convert back to PIL Image for resizing
+                    img_processed = Image.fromarray(img_array.astype(np.uint8))
+
+                    # Resize to target size
+                    img_resized = img_processed.resize(
+                        (target_size, target_size),
+                        Image.LANCZOS
+                    )
+
+                    # Save processed image as PNG (lossless, preserves detail)
+                    dst_file = processed_path / split_name / class_name / src_file.stem
+                    dst_file = dst_file.parent / f"{dst_file.name}.png"
+                    img_resized.save(dst_file, "PNG")
+
+                    processed += 1
+                    total_processed += 1
+
+                except Exception as e:
+                    print(f"\n    Error processing {src_file.name}: {e}")
+                    failed += 1
+                    total_failed += 1
+                    continue
+
+            if failed > 0:
+                print(f" ({processed} OK, {failed} failed)")
+            else:
+                print(f" - OK")
+
+    print(f"\n{'='*80}")
+    print(f"Data preprocessing complete!")
+    print(f"  Total processed: {total_processed}")
+    print(f"  Total failed: {total_failed}")
+    if apply_normalization:
+        print(f"  Macenko normalization: Applied")
+    print(f"  Target size: {target_size}x{target_size}")
+    print(f"{'='*80}")
 
 
 def apply_macenko_normalization(

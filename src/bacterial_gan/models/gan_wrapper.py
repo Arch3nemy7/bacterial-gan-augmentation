@@ -76,7 +76,7 @@ class ConditionalGAN:
             print("✅ Mixed precision training enabled (faster on GTX 1650)")
 
         # Build models
-        print("Building Generator...")
+        print("🏗️  Building Generator...")
         self.generator = build_generator(
             latent_dim=latent_dim,
             num_classes=num_classes,
@@ -84,7 +84,7 @@ class ConditionalGAN:
             channels=channels
         )
 
-        print("Building Discriminator...")
+        print("🏗️  Building Discriminator...")
         self.discriminator = build_discriminator(
             image_size=image_size,
             channels=channels,
@@ -95,7 +95,10 @@ class ConditionalGAN:
         # Get loss functions
         self.gen_loss_fn, self.disc_loss_fn = get_loss_functions(loss_type)
 
-        # Initialize optimizers
+        # Initialize optimizers with constant learning rate
+        # Note: Removed aggressive exponential decay that was causing learning rate collapse
+        # Previous decay (96% every 1000 steps) reduced LR from 0.0002 to 0.000038 after 130 epochs
+        # Constant LR allows stable long-term training for WGAN-GP
         self.gen_optimizer = keras.optimizers.Adam(
             learning_rate=learning_rate,
             beta_1=beta1
@@ -111,8 +114,8 @@ class ConditionalGAN:
         self.gp_metric = keras.metrics.Mean(name="gradient_penalty")
 
         print(f"✅ ConditionalGAN initialized with {loss_type.upper()} loss")
-        print(f"   Generator params: {self.generator.count_params():,}")
-        print(f"   Discriminator params: {self.discriminator.count_params():,}")
+        print(f"   🧬 Generator params: {self.generator.count_params():,}")
+        print(f"   🔍 Discriminator params: {self.discriminator.count_params():,}")
 
     @tf.function
     def train_discriminator_step(
@@ -160,8 +163,9 @@ class ConditionalGAN:
             # Add gradient penalty to discriminator loss (avoids += operator issues in graph mode)
             disc_loss = tf.add(disc_loss, gp)
 
-        # Update discriminator
+        # Update discriminator with gradient clipping for additional stability
         gradients = tape.gradient(disc_loss, self.discriminator.trainable_variables)
+        gradients, _ = tf.clip_by_global_norm(gradients, 5.0)  # Relaxed from 1.0 to allow stronger gradients
         self.disc_optimizer.apply_gradients(
             zip(gradients, self.discriminator.trainable_variables)
         )
@@ -192,8 +196,9 @@ class ConditionalGAN:
             # Calculate generator loss
             gen_loss = self.gen_loss_fn(fake_predictions)
 
-        # Update generator
+        # Update generator with gradient clipping for additional stability
         gradients = tape.gradient(gen_loss, self.generator.trainable_variables)
+        gradients, _ = tf.clip_by_global_norm(gradients, 5.0)  # Relaxed from 1.0 to allow stronger gradients
         self.gen_optimizer.apply_gradients(
             zip(gradients, self.generator.trainable_variables)
         )
@@ -276,8 +281,6 @@ class ConditionalGAN:
             'epoch': epoch,
             'generator_weights': self.generator.get_weights(),
             'discriminator_weights': self.discriminator.get_weights(),
-            'gen_optimizer_weights': self.gen_optimizer.get_weights(),
-            'disc_optimizer_weights': self.disc_optimizer.get_weights(),
             'config': {
                 'latent_dim': self.latent_dim,
                 'num_classes': self.num_classes,
@@ -291,11 +294,32 @@ class ConditionalGAN:
             }
         }
 
+        # Save optimizer weights if available (only after optimizer has been built)
+        # Optimizers are built after the first apply_gradients call
+        try:
+            # Build optimizers if not already built
+            if len(self.gen_optimizer.variables) > 0:
+                if hasattr(self.gen_optimizer, 'get_weights'):
+                    checkpoint['gen_optimizer_weights'] = self.gen_optimizer.get_weights()
+                else:
+                    # Keras 3 / TF 2.16+ fallback
+                    checkpoint['gen_optimizer_weights'] = [v.numpy() for v in self.gen_optimizer.variables]
+
+            if len(self.disc_optimizer.variables) > 0:
+                if hasattr(self.disc_optimizer, 'get_weights'):
+                    checkpoint['disc_optimizer_weights'] = self.disc_optimizer.get_weights()
+                else:
+                    # Keras 3 / TF 2.16+ fallback
+                    checkpoint['disc_optimizer_weights'] = [v.numpy() for v in self.disc_optimizer.variables]
+        except (AttributeError, ValueError) as e:
+            # Optimizer not built yet or incompatible - skip saving optimizer state
+            print(f"⚠️  Skipping optimizer weights (error): {e}")
+
         if metadata:
             checkpoint['metadata'] = metadata
 
         np.save(filepath, checkpoint, allow_pickle=True)
-        print(f"✅ Checkpoint saved to {filepath}")
+        print(f"💾 Checkpoint saved to {filepath}")
 
     def load_checkpoint(self, filepath: str):
         """
@@ -306,10 +330,44 @@ class ConditionalGAN:
         """
         checkpoint = np.load(filepath, allow_pickle=True).item()
 
+        # Load model weights first
         self.generator.set_weights(checkpoint['generator_weights'])
         self.discriminator.set_weights(checkpoint['discriminator_weights'])
-        self.gen_optimizer.set_weights(checkpoint['gen_optimizer_weights'])
-        self.disc_optimizer.set_weights(checkpoint['disc_optimizer_weights'])
+
+        # Build optimizers if not already built (required before setting weights)
+        if not self.gen_optimizer.built:
+            self.gen_optimizer.build(self.generator.trainable_variables)
+        if not self.disc_optimizer.built:
+            self.disc_optimizer.build(self.discriminator.trainable_variables)
+
+        # Load optimizer weights
+        if 'gen_optimizer_weights' in checkpoint:
+            try:
+                if hasattr(self.gen_optimizer, 'set_weights'):
+                    self.gen_optimizer.set_weights(checkpoint['gen_optimizer_weights'])
+                else:
+                    # Keras 3 / TF 2.16+ fallback
+                    weights = checkpoint['gen_optimizer_weights']
+                    if len(self.gen_optimizer.variables) == len(weights):
+                        for var, weight in zip(self.gen_optimizer.variables, weights):
+                            var.assign(weight)
+            except Exception as e:
+                print(f"⚠️  Could not load generator optimizer weights: {e}")
+                print("   ℹ️  Training will continue with fresh optimizer state")
+
+        if 'disc_optimizer_weights' in checkpoint:
+            try:
+                if hasattr(self.disc_optimizer, 'set_weights'):
+                    self.disc_optimizer.set_weights(checkpoint['disc_optimizer_weights'])
+                else:
+                    # Keras 3 / TF 2.16+ fallback
+                    weights = checkpoint['disc_optimizer_weights']
+                    if len(self.disc_optimizer.variables) == len(weights):
+                        for var, weight in zip(self.disc_optimizer.variables, weights):
+                            var.assign(weight)
+            except Exception as e:
+                print(f"⚠️  Could not load discriminator optimizer weights: {e}")
+                print("   ℹ️  Training will continue with fresh optimizer state")
 
         epoch = checkpoint['epoch']
         print(f"✅ Checkpoint loaded from {filepath} (epoch {epoch})")
@@ -332,7 +390,7 @@ class ConditionalGAN:
         filepath = Path(filepath)
         filepath.parent.mkdir(parents=True, exist_ok=True)
         self.generator.save(filepath)
-        print(f"✅ Generator saved to {filepath}")
+        print(f"💾 Generator saved to {filepath}")
 
     def load_generator(self, filepath: str):
         """

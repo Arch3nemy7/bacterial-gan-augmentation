@@ -1,13 +1,13 @@
 """
-Pipeline untuk menghasilkan data sintetis menggunakan trained GAN model.
+Pipeline for generating synthetic data using trained GAN model.
 
-Pipeline ini harus:
-1. Load trained model dari MLflow
-2. Generate data dengan balanced class distribution
+This pipeline should:
+1. Load trained model from MLflow
+2. Generate data with balanced class distribution
 3. Apply quality filtering
-4. Save generated data dengan proper metadata
+4. Save generated data with proper metadata
 5. Create evaluation reports
-6. Integration dengan expert evaluation workflow
+6. Integration with expert evaluation workflow
 """
 
 import mlflow
@@ -21,15 +21,15 @@ from ..utils import calculate_fid_score, save_checkpoint
 
 def run(settings: Settings, run_id: str, num_images: int):
     """
-    Menjalankan pipeline generasi data sintetis.
-    
+    Run synthetic data generation pipeline.
+
     Steps:
-    1. Load model dari MLflow run
+    1. Load model from MLflow run
     2. Generate specified number of images per class
-    3. Apply quality filtering menggunakan FID threshold
-    4. Save images dengan proper directory structure
-    5. Generate metadata dan evaluation report
-    6. Log artifacts ke MLflow untuk tracking
+    3. Apply quality filtering using FID threshold
+    4. Save images with proper directory structure
+    5. Generate metadata and evaluation report
+    6. Log artifacts to MLflow for tracking
     """
     
     mlflow.set_experiment("Bacterial GAN Augmentation")
@@ -63,21 +63,21 @@ def run(settings: Settings, run_id: str, num_images: int):
         logging.info("Data generation pipeline completed successfully")
 
 def load_model_from_mlflow(run_id: str) -> ConditionalGAN:
-    """Load trained GAN model dari MLflow registry."""
+    """Load trained GAN model from MLflow registry."""
     pass
 
 def generate_balanced_dataset(model: ConditionalGAN, num_images: int, reference_dir: Path) -> List:
-    """Generate dataset dengan balanced class distribution."""
+    """Generate dataset with balanced class distribution."""
     pass
 
 def apply_quality_filter(generated_data: List, settings: Settings) -> List:
-    """Filter generated images berdasarkan quality metrics."""
+    """Filter generated images based on quality metrics."""
     pass
 
 def save_synthetic_data(data: List, output_dir: Path) -> Path:
-    """Save generated images dengan proper structure dan metadata."""
+    """Save generated images with proper structure and metadata."""
     pass
 
 def create_evaluation_report(data: List, settings: Settings) -> Dict:
-    """Create comprehensive evaluation report untuk generated data."""
+    """Create comprehensive evaluation report for generated data."""
     pass

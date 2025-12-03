@@ -8,16 +8,56 @@ data:
   synthetic_data_dir: "data/03_synthetic"
   expert_testing_set_path: "data/04_expert_testing"
 
+preprocessing:
+  apply_macenko_normalization: false  # Enable Macenko to normalize background lighting variations
+  image_size: 128  # Target size for preprocessing (will resize to 128x128)
+  train_ratio: 0.7  # Training set ratio (70%)
+  val_ratio: 0.15  # Validation set ratio (15%)
+  test_ratio: 0.15  # Test set ratio (15%)
+  random_seed: 42  # Random seed for reproducible splits
+  # Macenko normalization parameters
+  macenko_io: 240  # Background light intensity
+  macenko_alpha: 1.0  # Percentile for angle calculation
+  macenko_beta: 0.15  # Optical density threshold for background filtering
+
 training:
-  image_size: 128  # Optimized for GTX 1650 (was 256)
-  batch_size: 8    # Reduced for GPU memory (was 16)
-  epochs: 200
-  learning_rate: 0.0002
-  beta1: 0.5
-  latent_dim: 100  # Dimension of noise vector
-  loss_type: "wgan-gp"  # Options: "wgan-gp", "lsgan", "vanilla"
-  n_critic: 5  # Number of discriminator updates per generator update
-  lambda_gp: 10.0  # Gradient penalty coefficient for WGAN-GP
+  # Model architecture
+  image_size: 128  # Input/output image size (must match preprocessing.image_size)
+  num_classes: 2  # Number of bacterial classes (gram-positive, gram-negative)
+  channels: 3  # RGB channels
+  latent_dim: 100  # Dimension of noise vector for generator
+
+  # Training hyperparameters
+  batch_size: 16  # Batch size for training (increased with 128x128 images)
+  epochs: 50  # Total number of training epochs
+  learning_rate: 0.0002  # Learning rate for both generator and discriminator (standard for GANs)
+  beta1: 0.5  # Adam optimizer beta1 parameter
+
+  # GAN loss settings
+  loss_type: "wgan-gp"  # Loss function: "wgan-gp", "lsgan", or "vanilla"
+  n_critic: 10  # Number of discriminator updates per generator update (increased for stronger critic)
+  lambda_gp: 10.0  # Gradient penalty coefficient (for WGAN-GP)
+
+  # Performance settings
+  use_mixed_precision: true  # Use mixed precision training (faster on modern GPUs)
+
+  # Output and checkpointing
+  checkpoint_interval: 5  # Save model checkpoint every N epochs
+  sample_interval: 5  # Generate sample images every N epochs
+  num_samples_during_training: 4  # Number of sample images to generate during training
+  num_samples_final: 8  # Number of sample images to generate at end of training
+  num_samples_grid: 16  # Total samples for visualization grid (must be perfect square)
+
+  # Output directories
+  models_output_dir: "models"  # Base directory for saving model checkpoints
+  samples_output_dir: "samples"  # Base directory for saving sample images
+
+  # MLflow settings
+  mlflow_experiment_name: "Bacterial GAN Augmentation"  # MLflow experiment name
+  mlflow_tracking_uri: ""  # MLflow tracking URI (empty = local ./mlruns)
+
+  # Dummy dataset settings (for testing when no real data available)
+  dummy_num_batches: 10  # Number of batches in dummy dataset
 
 evaluation:
   num_images_for_expert_panel: 25

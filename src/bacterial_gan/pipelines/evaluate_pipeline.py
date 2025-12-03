@@ -1,13 +1,13 @@
 """
-Pipeline untuk evaluasi komprehensif model GAN yang telah dilatih.
+Evaluation pipeline for comprehensive assessment of trained GAN models.
 
-Pipeline evaluasi harus mencakup:
+The evaluation pipeline should include:
 1. Quantitative metrics (FID, IS, LPIPS)
-2. Qualitative assessment preparation untuk expert panel
+2. Qualitative assessment preparation for expert panel
 3. Classification performance evaluation
 4. Diversity analysis
 5. Computational efficiency metrics
-6. Comparison dengan baseline methods
+6. Comparison with baseline methods
 """
 
 import mlflow
@@ -25,16 +25,16 @@ from ..data.dataset import GramStainDataset
 
 def run(settings: Settings, run_id: str):
     """
-    Menjalankan evaluasi komprehensif untuk trained model.
-    
+    Run comprehensive evaluation for a trained model.
+
     Evaluation steps:
-    1. Load model dan validation data
-    2. Generate synthetic samples untuk evaluation
+    1. Load model and validation data
+    2. Generate synthetic samples for evaluation
     3. Compute quantitative metrics
     4. Prepare expert evaluation dataset
     5. Evaluate classification performance
-    6. Generate evaluation report dan visualizations
-    7. Log semua results ke MLflow
+    6. Generate evaluation report and visualizations
+    7. Log all results to MLflow
     """
     
     mlflow.set_experiment("Bacterial GAN Augmentation")
@@ -76,12 +76,12 @@ def run(settings: Settings, run_id: str):
         
         logging.info("Evaluation pipeline completed successfully")
 
-def setup_evaluation(settings: Settings, run_id: str) -> Tuple[ConditionalGAN, Dataset]:
-    """Setup model dan validation data untuk evaluation."""
+def setup_evaluation(settings: Settings, run_id: str) -> Tuple[ConditionalGAN, GramStainDataset]:
+    """Setup model and validation data for evaluation."""
     pass
 
 def generate_evaluation_samples(model: ConditionalGAN, settings: Settings) -> np.ndarray:
-    """Generate samples untuk berbagai evaluation metrics."""
+    """Generate samples for various evaluation metrics."""
     pass
 
 def compute_quantitative_metrics(synthetic_data, real_data, settings: Settings) -> Dict:
@@ -90,13 +90,13 @@ def compute_quantitative_metrics(synthetic_data, real_data, settings: Settings) 
     1. FID (Fréchet Inception Distance)
     2. IS (Inception Score)
     3. LPIPS (Learned Perceptual Image Patch Similarity)
-    4. Precision dan Recall
-    5. Coverage dan Density
+    4. Precision and Recall
+    5. Coverage and Density
     """
     pass
 
 def prepare_expert_evaluation(synthetic_data, real_data, settings: Settings) -> Dict:
-    """Prepare dataset untuk expert panel evaluation."""
+    """Prepare dataset for expert panel evaluation."""
     pass
 
 def evaluate_classification_performance(synthetic_data, real_data, settings: Settings) -> Dict:
@@ -108,5 +108,5 @@ def generate_evaluation_report(quant_metrics: Dict, class_metrics: Dict, setting
     pass
 
 def log_evaluation_results(quant_metrics: Dict, class_metrics: Dict, expert_data: Dict, report: Dict):
-    """Log semua evaluation results ke MLflow."""
+    """Log all evaluation results to MLflow."""
     pass

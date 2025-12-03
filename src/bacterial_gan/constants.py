@@ -1,11 +1,11 @@
 """
-Constants dan enumerations untuk bacterial GAN augmentation project.
+Constants and enumerations for bacterial GAN augmentation project.
 
-File ini harus berisi:
+This file should contain:
 1. Model hyperparameters defaults
-2. File paths dan directory structure
-3. API endpoints dan response codes
-4. Evaluation thresholds dan metrics
+2. File paths and directory structure
+3. API endpoints and response codes
+4. Evaluation thresholds and metrics
 5. Bacterial class definitions
 6. Image processing parameters
 7. MLflow experiment names
@@ -16,16 +16,16 @@ from enum import Enum
 from pathlib import Path
 import os
 
-# Project structure
+# 📁 Project structure
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_ROOT = PROJECT_ROOT / "data"
 MODELS_ROOT = PROJECT_ROOT / "models"
 LOGS_ROOT = PROJECT_ROOT / "logs"
 CONFIGS_ROOT = PROJECT_ROOT / "configs"
 
-# Bacterial classes
+# 🧬 Bacterial classes
 class BacterialClass(Enum):
-    """Enumerasi untuk jenis bakteri dalam dataset."""
+    """Enumeration for bacterial types in the dataset."""
     GRAM_POSITIVE = "gram_positive"
     GRAM_NEGATIVE = "gram_negative"
 
@@ -44,15 +44,15 @@ DEFAULT_LEARNING_RATE = 0.0002
 DEFAULT_BETA1 = 0.5
 DEFAULT_EPOCHS = 200
 
-# Color normalization parameters
+# 🎨 Color normalization parameters
 MACENKO_IO = 240
 MACENKO_ALPHA = 1.0
 MACENKO_BETA = 0.15
 
-# Evaluation thresholds
-FID_THRESHOLD = 50.0  # Threshold untuk quality filtering
+# 📊 Evaluation thresholds
+FID_THRESHOLD = 50.0  # Threshold for quality filtering
 IS_THRESHOLD = 2.0    # Minimum Inception Score
-EXPERT_EVAL_SAMPLE_SIZE = 25  # Jumlah sampel untuk expert evaluation
+EXPERT_EVAL_SAMPLE_SIZE = 25  # Number of samples for expert evaluation
 
 # MLflow configuration
 MLFLOW_EXPERIMENT_NAME = "Bacterial GAN Augmentation"
@@ -82,8 +82,8 @@ CHECKPOINT_FREQUENCY = 10  # Save checkpoint every N epochs
 VALIDATION_FREQUENCY = 5   # Validate every N epochs
 SAMPLE_GENERATION_FREQUENCY = 10  # Generate samples every N epochs
 
-# Quality control
+# ✅ Quality control
 MIN_IMAGE_SIZE = (64, 64)
 MAX_IMAGE_SIZE = (1024, 1024)
 MIN_DATASET_SIZE_PER_CLASS = 100
-MAX_DUPLICATE_THRESHOLD = 0.95  # SSIM threshold untuk duplicate detection
+MAX_DUPLICATE_THRESHOLD = 0.95  # SSIM threshold for duplicate detection

@@ -1,11 +1,11 @@
 """
-Main FastAPI application untuk bacterial GAN augmentation API.
+Main FastAPI application for bacterial GAN augmentation API.
 
-API ini harus menyediakan endpoints untuk:
+This API should provide endpoints for:
 1. Model inference (generate synthetic images)
 2. Model management (list available models, model info)
-3. Health checks dan monitoring
-4. File upload untuk custom generation
+3. Health checks and monitoring
+4. File upload for custom generation
 5. Evaluation results retrieval
 6. Real-time generation progress tracking
 """
@@ -30,7 +30,7 @@ from app.core.dependencies import get_model_registry
 app = FastAPI(
     title=settings.app.title,
     version=settings.app.version,
-    description="API untuk generating synthetic bacterial images menggunakan trained GAN models",
+    description="API for generating synthetic bacterial images using trained GAN models",
     docs_url="/docs",
     redoc_url="/redoc"
 )
@@ -38,7 +38,7 @@ app = FastAPI(
 # Setup CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately untuk production
+    allow_origins=["*"],  # Configure appropriately for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,19 +49,19 @@ app.include_router(api_router, prefix="/api/v1")
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize services saat application startup."""
+    """Initialize services on application startup."""
     setup_api_logging()
     logging.info("Bacterial GAN API starting up...")
-    
+
     # Initialize model registry
     # Load available models
     # Setup monitoring
-    
+
     logging.info("API startup completed")
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Cleanup resources saat application shutdown."""
+    """Cleanup resources on application shutdown."""
     logging.info("Bacterial GAN API shutting down...")
     # Cleanup model instances
     # Close database connections
@@ -69,7 +69,7 @@ async def shutdown_event():
 
 @app.get("/")
 async def root():
-    """Root endpoint dengan basic API information."""
+    """Root endpoint with basic API information."""
     return {
         "message": "Bacterial GAN Augmentation API",
         "version": settings.app.version,
@@ -79,7 +79,7 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint untuk monitoring."""
+    """Health check endpoint for monitoring."""
     return {
         "status": "healthy",
         "version": settings.app.version,

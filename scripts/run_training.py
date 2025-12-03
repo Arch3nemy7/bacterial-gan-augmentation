@@ -1,12 +1,12 @@
 """
-Script untuk menjalankan training pipeline dengan konfigurasi yang mudah.
+Script for running training pipeline with easy configuration.
 
-Script ini harus:
+This script should:
 1. Parse command line arguments
 2. Load configuration files
-3. Setup logging dan monitoring
+3. Setup logging and monitoring
 4. Initialize MLflow tracking
-5. Run training pipeline dengan error handling
+5. Run training pipeline with error handling
 6. Provide progress updates
 7. Handle interruption gracefully
 """
@@ -18,7 +18,7 @@ from pathlib import Path
 import signal
 import traceback
 
-# Add src to path untuk import modules
+# Add src to path for importing modules
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from config import get_settings
@@ -26,7 +26,7 @@ from pipelines.train_pipeline import run as train_run
 from utils import setup_logging
 
 def parse_arguments():
-    """Parse command line arguments untuk training script."""
+    """Parse command line arguments for training script."""
     parser = argparse.ArgumentParser(
         description="Run bacterial GAN training pipeline"
     )
@@ -55,7 +55,7 @@ def parse_arguments():
     return parser.parse_args()
 
 def setup_signal_handlers():
-    """Setup signal handlers untuk graceful shutdown."""
+    """Setup signal handlers for graceful shutdown."""
     def signal_handler(sig, frame):
         logging.info("Received interrupt signal. Shutting down gracefully...")
         # Save current model state
@@ -66,19 +66,19 @@ def setup_signal_handlers():
     signal.signal(signal.SIGTERM, signal_handler)
 
 def validate_environment():
-    """Validate environment dan dependencies sebelum training."""
+    """Validate environment and dependencies before training."""
     try:
         import tensorflow as tf
         import mlflow
         import numpy as np
         import PIL
         logging.info("All required dependencies are available")
-        
+
         # Check GPU availability
         if tf.config.list_physical_devices('GPU'):
             logging.info("GPU detected and available")
         else:
-            logging.warning("No GPU detected. Training akan menggunakan CPU")
+            logging.warning("No GPU detected. Training will use CPU")
             
         return True
     except ImportError as e:

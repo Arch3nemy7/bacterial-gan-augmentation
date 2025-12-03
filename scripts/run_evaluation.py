@@ -1,13 +1,13 @@
 """
-Script untuk menjalankan evaluation pipeline untuk trained models.
+Script for running evaluation pipeline for trained models.
 
-Script ini harus:
-1. Parse command line arguments untuk model selection
-2. Load trained model dari MLflow
+This script should:
+1. Parse command line arguments for model selection
+2. Load trained model from MLflow
 3. Run comprehensive evaluation
 4. Generate evaluation reports
-5. Save results dan visualizations
-6. Compare multiple models jika diperlukan
+5. Save results and visualizations
+6. Compare multiple models if required
 """
 
 import argparse
@@ -24,33 +24,33 @@ from pipelines.evaluate_pipeline import run as evaluate_run
 from utils import setup_logging
 
 def parse_arguments():
-    """Parse command line arguments untuk evaluation script."""
+    """Parse command line arguments for evaluation script."""
     parser = argparse.ArgumentParser(
         description="Evaluate trained bacterial GAN models"
     )
     parser.add_argument(
-        "--run-id", 
-        type=str, 
+        "--run-id",
+        type=str,
         required=True,
-        help="MLflow run ID dari trained model"
+        help="MLflow run ID of trained model"
     )
     parser.add_argument(
-        "--config", 
-        type=str, 
+        "--config",
+        type=str,
         default="configs/config.yaml",
         help="Path to configuration file"
     )
     parser.add_argument(
-        "--output-dir", 
-        type=str, 
+        "--output-dir",
+        type=str,
         default="evaluation_results",
-        help="Directory untuk menyimpan evaluation results"
+        help="Directory to save evaluation results"
     )
     parser.add_argument(
-        "--compare-with", 
-        type=str, 
+        "--compare-with",
+        type=str,
         nargs="+",
-        help="Compare dengan model lain (provide run IDs)"
+        help="Compare with other models (provide run IDs)"
     )
     parser.add_argument(
         "--generate-report", 
@@ -65,7 +65,7 @@ def parse_arguments():
     return parser.parse_args()
 
 def validate_run_id(run_id: str) -> bool:
-    """Validate bahwa run ID exists di MLflow."""
+    """Validate that run ID exists in MLflow."""
     try:
         import mlflow
         run = mlflow.get_run(run_id)
@@ -109,12 +109,12 @@ def main():
         # Compare with other models if requested
         if args.compare_with:
             logging.info("Running model comparison...")
-            # Implementation untuk model comparison
-        
+            # Implementation for model comparison
+
         # Generate detailed report if requested
         if args.generate_report:
             logging.info("Generating detailed HTML report...")
-            # Implementation untuk HTML report generation
+            # Implementation for HTML report generation
         
         logging.info("Evaluation completed successfully!")
         
