@@ -1,4 +1,4 @@
-"""Training pipeline with MLflow integration."""
+"""Training pipeline with MLflow integration and memory optimization."""
 
 import mlflow
 import mlflow.tensorflow
@@ -13,6 +13,13 @@ from tqdm import tqdm
 from bacterial_gan.config import Settings
 from bacterial_gan.models.gan_wrapper import ConditionalGAN
 from bacterial_gan.data.dataset import GramStainDataset
+from bacterial_gan.utils.memory_optimization import (
+    configure_tensorflow_memory,
+    configure_cpu_parallelism,
+    enable_xla_compilation,
+    clear_session,
+    get_memory_info
+)
 
 
 def save_sample_images(
@@ -71,7 +78,7 @@ def save_sample_images(
 
 def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
     """
-    Run complete training pipeline with MLflow tracking.
+    Run complete training pipeline with MLflow tracking and memory optimization.
 
     Args:
         settings: Configuration settings
@@ -80,6 +87,28 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
     print("=" * 80)
     print("🧬 BACTERIAL GAN TRAINING PIPELINE")
     print("=" * 80)
+    print()
+
+    # ========================================================================
+    # HARDWARE OPTIMIZATION (4GB GPU + 12 CPU threads + 16GB RAM)
+    # ========================================================================
+    print("🔧 Configuring TensorFlow for optimal hardware utilization...")
+    print()
+
+    # 1. GPU Memory Optimization (4GB VRAM) - use memory growth for safety
+    configure_tensorflow_memory()  # Dynamic allocation (safer for 4GB VRAM)
+
+    # 2. CPU Parallelization (12 threads for data loading)
+    configure_cpu_parallelism(num_threads=12)
+
+    # 3. XLA compilation - DISABLED by default to prevent OOM on 4GB VRAM
+    # XLA can increase memory usage during graph compilation (causes OOM)
+    # Enable only if you have >8GB VRAM: enable_xla_compilation(enable=True)
+    enable_xla_compilation(enable=settings.training.memory_optimization.enable_xla)
+
+    # 4. Clear any existing session
+    clear_session()
+
     print()
 
     # Set MLflow experiment - restore if deleted
@@ -111,6 +140,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             "epochs": settings.training.epochs,
             "learning_rate": settings.training.learning_rate,
             "beta1": settings.training.beta1,
+            "beta2": settings.training.beta2,
             "latent_dim": settings.training.latent_dim,
             "loss_type": settings.training.loss_type,
             "n_critic": settings.training.n_critic,
@@ -131,6 +161,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             channels=3,
             learning_rate=settings.training.learning_rate,
             beta1=settings.training.beta1,
+            beta2=settings.training.beta2,
             loss_type=settings.training.loss_type,
             lambda_gp=settings.training.lambda_gp,
             n_critic=settings.training.n_critic,
@@ -189,7 +220,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                 batch_size=settings.training.batch_size,
                 image_size=settings.training.image_size
             )
-            num_batches = 10  # Hardcoded for dummy dataset
+            num_batches = settings.training.dummy_num_batches
 
         print()
 
@@ -258,7 +289,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             # Save sample images every N epochs (4 samples for GPU memory constraints)
             if (epoch + 1) % settings.training.sample_interval == 0 or epoch == 0:
                 print(f"🎨 Generating sample images...")
-                sample_path = save_sample_images(gan, epoch + 1, samples_dir, num_samples=4)
+                sample_path = save_sample_images(gan, epoch + 1, samples_dir, num_samples=settings.training.num_samples_during_training)
                 mlflow.log_artifact(sample_path, "samples")
                 print(f"✅ Samples saved to {sample_path}")
                 print()
@@ -298,7 +329,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
 
         # Generate final samples (8 samples for GPU memory)
         print("🎨 Generating final sample images...")
-        final_sample_path = save_sample_images(gan, settings.training.epochs, samples_dir, num_samples=8)
+        final_sample_path = save_sample_images(gan, settings.training.epochs, samples_dir, num_samples=settings.training.num_samples_final)
         mlflow.log_artifact(final_sample_path, "final_samples")
 
         print()

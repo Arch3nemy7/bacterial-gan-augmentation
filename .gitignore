@@ -19,7 +19,7 @@ data/03_synthetic/*
 data/04_expert_testing/*
 !data/*/.gitkeep
 !data/*/*/.gitkeep
-models/
+*.npy
 samples/
 *.h5
 *.keras

@@ -23,17 +23,35 @@ class DataConfig(BaseModel):
     expert_testing_set_path: pathlib.Path
 
 class PreprocessingConfig(BaseModel):
-    """Configuration for data preprocessing."""
-    apply_macenko_normalization: bool = True
-    image_size: int = 256  # Target size for preprocessing
+    """Configuration for data preprocessing with patch extraction."""
+    # Patch extraction settings
+    use_patch_extraction: bool = True
+    image_size: int = 256  # Patch size to extract from high-res images
+    apply_augmentation: bool = True  # Apply traditional augmentation (8x multiplier)
+    bg_threshold: float = 0.9  # Background filtering threshold (0.9 = >90% white space)
+    max_patches_per_split: int | None = None  # Maximum number of patches to generate per split (Train/Val/Test)
+
+    # Data splitting
     train_ratio: float = 0.7
     val_ratio: float = 0.15
     test_ratio: float = 0.15
     random_seed: int = 42
+
     # Macenko normalization parameters
+    apply_macenko_normalization: bool = False
     macenko_io: int = 240  # Background light intensity
     macenko_alpha: float = 1.0  # Percentile for angle calculation
     macenko_beta: float = 0.15  # Optical density threshold
+
+class MemoryOptimizationConfig(BaseModel):
+    """Configuration for memory optimization."""
+    gpu_memory_growth: bool = True
+    gpu_memory_limit_mb: int | None = None
+    cpu_threads: int | None = 12
+    enable_xla: bool = False
+    dataset_prefetch_buffer: int = -1
+    dataset_cache_in_memory: bool = False
+    dataset_cache_filename: str | None = None
 
 class TrainingConfig(BaseModel):
     """Hyperparameters for model training."""
@@ -44,11 +62,13 @@ class TrainingConfig(BaseModel):
     epochs: int = 200
     learning_rate: float = 0.0002
     beta1: float = 0.5
+    beta2: float = 0.9
     latent_dim: int = 100
     loss_type: str = "wgan-gp"
     n_critic: int = 5
     lambda_gp: float = 10.0
     use_mixed_precision: bool = True
+    memory_optimization: MemoryOptimizationConfig = MemoryOptimizationConfig()
     checkpoint_interval: int = 50
     sample_interval: int = 10
     num_samples_during_training: int = 4

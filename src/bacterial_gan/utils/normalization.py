@@ -1,7 +1,8 @@
+"""Color normalization utilities for bacterial images."""
+
 import numpy as np
-import tensorflow as tf  # Using TensorFlow, not PyTorch
-from skimage import color
 from PIL import Image
+
 
 def normalize_macenko(img: np.ndarray, Io=240, alpha=1, beta=0.15):
     """
@@ -96,6 +97,7 @@ def normalize_macenko(img: np.ndarray, Io=240, alpha=1, beta=0.15):
 
     return norm_img
 
+
 # Wrapper for use with torchvision.transforms
 class MacenkoNormalize(object):
     def __call__(self, img):
@@ -105,45 +107,3 @@ class MacenkoNormalize(object):
         norm_img = normalize_macenko(np_img)
         # Convert back to PIL Image
         return Image.fromarray(norm_img)
-
-def setup_logging():
-    """
-    Setup logging configuration for the entire project.
-    Should configure different log levels for training, evaluation, and API.
-    """
-    pass
-
-def save_checkpoint(model, optimizer, epoch, loss, filepath):
-    """
-    Save model checkpoint with metadata for resuming training.
-    Should include model state, optimizer state, epoch info, and loss history.
-    """
-    pass
-
-def load_checkpoint(filepath, model, optimizer=None):
-    """
-    Load model checkpoint and return metadata.
-    Should handle compatibility checks and version migration.
-    """
-    pass
-
-def calculate_fid_score(real_images, generated_images):
-    """
-    Calculate Fréchet Inception Distance for evaluation.
-    Key metric for GAN quality assessment.
-    """
-    pass
-
-def calculate_is_score(generated_images):
-    """
-    Calculate Inception Score for generated images.
-    Another important GAN evaluation metric.
-    """
-    pass
-
-def visualize_training_progress(generator, epoch, save_path):
-    """
-    Generate and save sample images during training for monitoring.
-    Should create grid layouts and save to MLflow artifacts.
-    """
-    pass

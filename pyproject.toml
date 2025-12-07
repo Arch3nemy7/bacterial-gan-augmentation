@@ -9,7 +9,7 @@ packages = [{include = "bacterial_gan", from = "src"}]
 [tool.poetry.dependencies]
 python = "^3.11"
 # Core ML
-tensorflow = "^2.15.0"
+tensorflow = {extras = ["and-cuda"], version = "^2.15.0"}
 # tensorflow-addons removed - not compatible with Python 3.12, and we don't need it
 numpy = "^1.26.0"
 pillow = "^10.0.0"

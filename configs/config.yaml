@@ -9,13 +9,21 @@ data:
   expert_testing_set_path: "data/04_expert_testing"
 
 preprocessing:
-  apply_macenko_normalization: false  # Enable Macenko to normalize background lighting variations
-  image_size: 128  # Target size for preprocessing (will resize to 128x128)
+  # Patch extraction settings (NEW: extracts patches instead of resizing)
+  use_patch_extraction: true # If true, extracts all possible patches. If false, extracts a single random patch per image.
+  image_size: 128  # Patch size to extract from high-res images (128x128 for 4GB VRAM)
+  apply_augmentation: false  # Apply traditional augmentation (rotations + flips, 8x multiplier)
+  bg_threshold: 0.9  # Background filtering threshold (0.9 = discard patches with >90% white space)
+  max_patches_per_split: 5000 # Limit dataset size to prevent storage explosion
+
+  # Data splitting
   train_ratio: 0.7  # Training set ratio (70%)
   val_ratio: 0.15  # Validation set ratio (15%)
   test_ratio: 0.15  # Test set ratio (15%)
   random_seed: 42  # Random seed for reproducible splits
-  # Macenko normalization parameters
+
+  # Macenko normalization parameters (NOT recommended for this project)
+  apply_macenko_normalization: false  # Enable Macenko to normalize background lighting variations
   macenko_io: 240  # Background light intensity
   macenko_alpha: 1.0  # Percentile for angle calculation
   macenko_beta: 0.15  # Optical density threshold for background filtering
@@ -29,21 +37,39 @@ training:
 
   # Training hyperparameters
   batch_size: 16  # Batch size for training (increased with 128x128 images)
-  epochs: 50  # Total number of training epochs
+  epochs: 300  # Total number of training epochs
   learning_rate: 0.0002  # Learning rate for both generator and discriminator (standard for GANs)
-  beta1: 0.5  # Adam optimizer beta1 parameter
+  beta1: 0.0  # Adam optimizer beta1 parameter (0.0 for WGAN-GP)
+  beta2: 0.9  # Adam optimizer beta2 parameter (0.9 for WGAN-GP)
 
   # GAN loss settings
   loss_type: "wgan-gp"  # Loss function: "wgan-gp", "lsgan", or "vanilla"
-  n_critic: 10  # Number of discriminator updates per generator update (increased for stronger critic)
+  n_critic: 5  # Number of discriminator updates per generator update (increased for stronger critic)
   lambda_gp: 10.0  # Gradient penalty coefficient (for WGAN-GP)
 
   # Performance settings
-  use_mixed_precision: true  # Use mixed precision training (faster on modern GPUs)
+  use_mixed_precision: false  # Use mixed precision training (faster on modern GPUs)
+
+  # Memory optimization settings
+  memory_optimization:
+    # GPU memory configuration
+    gpu_memory_growth: true  # Enable dynamic GPU memory allocation (recommended for 4GB VRAM)
+    gpu_memory_limit_mb: null  # Hard GPU memory limit in MB (null = use growth instead, e.g., 3072 for 3GB limit)
+
+    # CPU parallelization
+    cpu_threads: 12  # Number of CPU threads for data loading (null = auto-detect)
+
+    # XLA compilation
+    enable_xla: false  # Enable XLA compilation (⚠️ DISABLE for 4GB VRAM to prevent OOM, enable for >8GB VRAM)
+
+    # Dataset pipeline optimization
+    dataset_prefetch_buffer: -1  # Prefetch buffer size (-1 = AUTOTUNE, or set to specific value like 2)
+    dataset_cache_in_memory: false  # Cache dataset in RAM (only for small datasets <1GB)
+    dataset_cache_filename: null  # Disk-based cache file path (null = no disk caching, e.g., "data/cache/train.tfcache")
 
   # Output and checkpointing
-  checkpoint_interval: 5  # Save model checkpoint every N epochs
-  sample_interval: 5  # Generate sample images every N epochs
+  checkpoint_interval: 50  # Save model checkpoint every N epochs
+  sample_interval: 10  # Generate sample images every N epochs
   num_samples_during_training: 4  # Number of sample images to generate during training
   num_samples_final: 8  # Number of sample images to generate at end of training
   num_samples_grid: 16  # Total samples for visualization grid (must be perfect square)

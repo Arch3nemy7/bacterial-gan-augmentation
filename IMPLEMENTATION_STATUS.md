@@ -100,7 +100,7 @@
    - `SpectralNormalization` - Stabilizes GAN training
    - `SelfAttention` - Captures long-range dependencies
 
-   **Generator (U-Net based):**
+   **Generator (ResNet based):**
    - Input: Noise (100D) + Class label (2 classes)
    - Architecture: 8x8 → 16x16 → 32x32 → 64x64 (attention) → 128x128
    - Output: 128x128x3 RGB images

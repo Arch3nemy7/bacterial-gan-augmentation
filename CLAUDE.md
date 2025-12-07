@@ -72,7 +72,7 @@ make clean                      # Remove cache files and __pycache__
 ## Architecture Overview
 
 ### GAN Architecture
-- **Generator**: U-Net based conditional generator that takes noise + class label and produces synthetic bacterial images
+- **Generator**: ResNet based conditional generator that takes noise + class label and produces synthetic bacterial images
 - **Discriminator**: PatchGAN discriminator that focuses on local texture patterns and class conditioning
 - **Model Type**: Conditional GAN (cGAN) for class-specific image generation
 - **Image Size**: 256x256 pixels, 3 channels (RGB)
@@ -86,7 +86,7 @@ make clean                      # Remove cache files and __pycache__
 - Data directories: `data/01_raw/`, `data/02_processed/`, `data/03_synthetic/`
 
 **Models (`src/models/`):**
-- `architecture.py`: Generator and Discriminator definitions (U-Net, PatchGAN)
+- `architecture.py`: Generator and Discriminator definitions (ResNet, PatchGAN)
   - Supports custom layers: SpectralNormalization, SelfAttention
   - Multiple loss functions: adversarial (WGAN-GP/LSGAN), reconstruction (L1/L2), perceptual (VGG-based)
 - `gan_wrapper.py`: High-level GAN wrapper for training and inference
@@ -112,7 +112,7 @@ Configuration is centralized in `configs/config.yaml`:
 - `app`: API settings (title, version)
 - `data`: Data directory paths
 - `preprocessing`: Image size, channels
-- `model`: Architecture selection (U-Net, PatchGAN, cGAN)
+- `model`: Architecture selection (ResNet, PatchGAN, cGAN)
 - `training`: Optimizer, learning rate, batch size, epochs
 
 Access via `src/config.py` using `get_settings(config_path)`.

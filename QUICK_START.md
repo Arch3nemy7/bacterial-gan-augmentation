@@ -66,7 +66,7 @@ This will:
 - Image validation
 
 ### ✅ GAN Architecture (Phase 3)
-- Conditional Generator (U-Net)
+- Conditional Generator (ResNet)
 - PatchGAN Discriminator
 - Spectral Normalization
 - Self-Attention

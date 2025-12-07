@@ -29,7 +29,7 @@ def main():
 
     # Build Generator
     print("\n" + "-" * 80)
-    print("Building Generator (U-Net)...")
+    print("Building Generator (ResNet)...")
     print("-" * 80)
 
     generator = build_generator(

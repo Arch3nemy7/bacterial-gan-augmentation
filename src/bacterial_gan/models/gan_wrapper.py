@@ -39,6 +39,7 @@ class ConditionalGAN:
         channels: int = 3,
         learning_rate: float = 0.0002,
         beta1: float = 0.5,
+        beta2: float = 0.9,
         loss_type: str = "wgan-gp",
         lambda_gp: float = 10.0,
         n_critic: int = 5,
@@ -65,6 +66,7 @@ class ConditionalGAN:
         self.channels = channels
         self.learning_rate = learning_rate
         self.beta1 = beta1
+        self.beta2 = beta2
         self.loss_type = loss_type
         self.lambda_gp = lambda_gp
         self.n_critic = n_critic
@@ -88,8 +90,7 @@ class ConditionalGAN:
         self.discriminator = build_discriminator(
             image_size=image_size,
             channels=channels,
-            num_classes=num_classes,
-            use_spectral_norm=(loss_type == "wgan-gp")
+            num_classes=num_classes
         )
 
         # Get loss functions
@@ -101,11 +102,13 @@ class ConditionalGAN:
         # Constant LR allows stable long-term training for WGAN-GP
         self.gen_optimizer = keras.optimizers.Adam(
             learning_rate=learning_rate,
-            beta_1=beta1
+            beta_1=beta1,
+            beta_2=beta2
         )
         self.disc_optimizer = keras.optimizers.Adam(
             learning_rate=learning_rate,
-            beta_1=beta1
+            beta_1=beta1,
+            beta_2=beta2
         )
 
         # Metrics tracking
@@ -163,9 +166,8 @@ class ConditionalGAN:
             # Add gradient penalty to discriminator loss (avoids += operator issues in graph mode)
             disc_loss = tf.add(disc_loss, gp)
 
-        # Update discriminator with gradient clipping for additional stability
+        # Update discriminator
         gradients = tape.gradient(disc_loss, self.discriminator.trainable_variables)
-        gradients, _ = tf.clip_by_global_norm(gradients, 5.0)  # Relaxed from 1.0 to allow stronger gradients
         self.disc_optimizer.apply_gradients(
             zip(gradients, self.discriminator.trainable_variables)
         )
@@ -196,9 +198,8 @@ class ConditionalGAN:
             # Calculate generator loss
             gen_loss = self.gen_loss_fn(fake_predictions)
 
-        # Update generator with gradient clipping for additional stability
+        # Update generator
         gradients = tape.gradient(gen_loss, self.generator.trainable_variables)
-        gradients, _ = tf.clip_by_global_norm(gradients, 5.0)  # Relaxed from 1.0 to allow stronger gradients
         self.gen_optimizer.apply_gradients(
             zip(gradients, self.generator.trainable_variables)
         )

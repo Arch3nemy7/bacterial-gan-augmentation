@@ -43,13 +43,18 @@ def main():
         return
 
     print("\n" + "-" * 80)
-    print("Step 2: Creating train/val/test splits...")
+    print("Step 2: Creating train/val/test splits with patch extraction...")
     print("-" * 80)
     create_data_splits(
         settings.data,
-        train_ratio=0.7,
-        val_ratio=0.15,
-        test_ratio=0.15,
+        train_ratio=settings.preprocessing.train_ratio,
+        val_ratio=settings.preprocessing.val_ratio,
+        test_ratio=settings.preprocessing.test_ratio,
+        random_seed=settings.preprocessing.random_seed,
+        patch_size=settings.preprocessing.image_size,
+        apply_normalization=settings.preprocessing.apply_macenko_normalization,
+        apply_augmentation=settings.preprocessing.apply_augmentation,
+        bg_threshold=settings.preprocessing.bg_threshold,
     )
 
     print("\n" + "-" * 80)
