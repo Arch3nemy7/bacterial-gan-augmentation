@@ -33,6 +33,99 @@ fi
 echo "Detected OS: $OS"
 echo ""
 
+# ============================================
+# Python 3.11 Installation via pyenv
+# ============================================
+REQUIRED_PYTHON_VERSION="3.11.9"
+PYTHON_MAJOR_MINOR="3.11"
+
+echo "============================================="
+echo "Checking Python 3.11 Installation"
+echo "============================================="
+echo ""
+
+# Check if pyenv directory exists or command is available
+if command -v pyenv &> /dev/null; then
+    echo "✅ pyenv already installed ($(pyenv --version))"
+elif [ -d "$HOME/.pyenv" ]; then
+    echo "✅ pyenv directory found at $HOME/.pyenv"
+    echo "   Setting up pyenv in current shell..."
+else
+    echo "📦 Installing pyenv..."
+
+    # Install pyenv dependencies for Ubuntu/Debian
+    if [[ "$OS" == "Linux" ]] && command -v apt-get &> /dev/null; then
+        echo "   Installing pyenv build dependencies..."
+        echo "   (You may be prompted for sudo password)"
+        sudo apt-get update
+        sudo apt-get install -y make build-essential libssl-dev zlib1g-dev \
+            libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm \
+            libncursesw5-dev xz-utils tk-dev libxml2-dev libxmlsec1-dev \
+            libffi-dev liblzma-dev git
+    fi
+
+    # Install pyenv
+    curl https://pyenv.run | bash
+
+    echo "✅ pyenv installed"
+fi
+
+# Always show the shell configuration instructions if pyenv command is not available
+if ! command -v pyenv &> /dev/null; then
+    echo ""
+    echo "⚠️  IMPORTANT: Add pyenv to your shell configuration:"
+    echo "    For bash, add to ~/.bashrc:"
+    echo "      export PYENV_ROOT=\"\$HOME/.pyenv\""
+    echo "      command -v pyenv >/dev/null || export PATH=\"\$PYENV_ROOT/bin:\$PATH\""
+    echo "      eval \"\$(pyenv init -)\""
+    echo ""
+    echo "    For zsh, add to ~/.zshrc:"
+    echo "      export PYENV_ROOT=\"\$HOME/.pyenv\""
+    echo "      command -v pyenv >/dev/null || export PATH=\"\$PYENV_ROOT/bin:\$PATH\""
+    echo "      eval \"\$(pyenv init -)\""
+    echo ""
+    echo "    Then run: source ~/.bashrc (or source ~/.zshrc)"
+    echo ""
+fi
+
+# Ensure pyenv is in PATH for this script
+export PYENV_ROOT="$HOME/.pyenv"
+export PATH="$PYENV_ROOT/bin:$PATH"
+if command -v pyenv &> /dev/null; then
+    eval "$(pyenv init -)"
+fi
+
+# Check if Python 3.11.9 is installed via pyenv
+if pyenv versions | grep -q "$REQUIRED_PYTHON_VERSION"; then
+    echo "✅ Python $REQUIRED_PYTHON_VERSION already installed via pyenv"
+else
+    echo "📦 Installing Python $REQUIRED_PYTHON_VERSION via pyenv..."
+    echo "   (This may take several minutes...)"
+    pyenv install "$REQUIRED_PYTHON_VERSION"
+    echo "✅ Python $REQUIRED_PYTHON_VERSION installed"
+fi
+
+# Set Python 3.11.9 as local version for this project
+echo "📌 Setting Python $REQUIRED_PYTHON_VERSION as local version for this project..."
+pyenv local "$REQUIRED_PYTHON_VERSION"
+
+# Verify Python version
+CURRENT_PYTHON_VERSION=$(python --version 2>&1 | awk '{print $2}')
+echo "✅ Current Python version: $CURRENT_PYTHON_VERSION"
+
+# Verify that we're actually using Python 3.11
+if [[ ! "$CURRENT_PYTHON_VERSION" =~ ^3\.11\. ]]; then
+    echo "❌ ERROR: Expected Python 3.11.x but got $CURRENT_PYTHON_VERSION"
+    echo "   pyenv may not be properly initialized in this shell."
+    echo "   Try running these commands manually:"
+    echo "   export PYENV_ROOT=\"\$HOME/.pyenv\""
+    echo "   export PATH=\"\$PYENV_ROOT/bin:\$PATH\""
+    echo "   eval \"\$(pyenv init -)\""
+    echo "   pyenv local $REQUIRED_PYTHON_VERSION"
+    exit 1
+fi
+echo ""
+
 # Check for python3-venv (Common issue on Ubuntu VPS)
 if [[ "$OS" == "Linux" ]] && command -v apt-get &> /dev/null; then
     if ! dpkg -s python3-venv &> /dev/null && ! python3 -c "import venv" &> /dev/null; then
@@ -44,6 +137,8 @@ fi
 
 # Check if Poetry is installed
 POETRY_CMD=""
+POETRY_NEEDS_REINSTALL=false
+
 if command -v poetry &> /dev/null; then
     POETRY_CMD="poetry"
     echo "✅ Poetry already installed ($(poetry --version))"
@@ -51,15 +146,45 @@ elif [ -f "$POETRY_PATH/poetry" ]; then
     POETRY_CMD="$POETRY_PATH/poetry"
     export PATH="$POETRY_PATH:$PATH"
     echo "✅ Poetry found at $POETRY_PATH"
+    echo "   Checking Poetry version: $($POETRY_CMD --version)"
 else
-    echo "📦 Installing Poetry..."
-    curl -sSL https://install.python-poetry.org | python3 -
+    POETRY_NEEDS_REINSTALL=true
+fi
+
+# Check if Poetry was installed with the correct Python
+# Poetry stores its installation info in a predictable location
+if [ -n "$POETRY_CMD" ] && [ -d "$HOME/.local/share/pypoetry/venv" ]; then
+    POETRY_PYTHON_VERSION=$($HOME/.local/share/pypoetry/venv/bin/python --version 2>&1 | awk '{print $2}')
+    echo "   Poetry's Python version: $POETRY_PYTHON_VERSION"
+    if [[ ! "$POETRY_PYTHON_VERSION" =~ ^3\.11\. ]]; then
+        echo "⚠️  Poetry was installed with Python $POETRY_PYTHON_VERSION"
+        echo "   Need to reinstall with Python 3.11..."
+        POETRY_NEEDS_REINSTALL=true
+    fi
+fi
+
+if [ "$POETRY_NEEDS_REINSTALL" = true ]; then
+    echo "📦 Installing Poetry with Python $PYTHON_MAJOR_MINOR..."
+
+    # Remove old Poetry installation completely
+    if [ -d "$HOME/.local/share/pypoetry" ]; then
+        echo "   Removing old Poetry installation..."
+        rm -rf "$HOME/.local/share/pypoetry"
+    fi
+    if [ -f "$POETRY_PATH/poetry" ]; then
+        rm -f "$POETRY_PATH/poetry"
+    fi
+    # Also remove Poetry cache
+    rm -rf "$HOME/.cache/pypoetry" 2>/dev/null || true
+
+    # Use the pyenv Python to install Poetry
+    curl -sSL https://install.python-poetry.org | python -
 
     # Add Poetry to PATH
     export PATH="$POETRY_PATH:$PATH"
     POETRY_CMD="poetry"
 
-    echo "✅ Poetry installed to $POETRY_PATH"
+    echo "✅ Poetry installed to $POETRY_PATH using Python 3.11"
     echo ""
     echo "⚠️  IMPORTANT: Add Poetry to your PATH permanently:"
     echo "    For bash: echo 'export PATH=\"$POETRY_PATH:\$PATH\"' >> ~/.bashrc"
@@ -67,32 +192,94 @@ else
     echo "    For fish: fish_add_path $POETRY_PATH"
     echo "              (or: set -Ua fish_user_paths $POETRY_PATH)"
     echo ""
-    # Only pause if we actually installed it, so automated scripts don't hang
-    # read -p "Press Enter to continue..."
 fi
+
+echo ""
+echo "📦 Configuring Poetry to use Python $PYTHON_MAJOR_MINOR..."
+
+# Remove any existing Poetry virtual environments for this project
+echo "   Removing any existing Poetry virtual environments..."
+$POETRY_CMD env remove --all 2>/dev/null || true
+rm -rf .venv 2>/dev/null || true
+
+# Configure Poetry to use in-project virtualenvs
+echo "   Configuring Poetry to use in-project virtualenvs..."
+$POETRY_CMD config virtualenvs.in-project true --local
+
+# Get the exact path to the pyenv Python
+PYENV_PYTHON_PATH=$(pyenv which python)
+echo "   Using Python from: $PYENV_PYTHON_PATH"
+
+# Tell Poetry to use this specific Python version
+echo "   Setting Poetry to use Python 3.11..."
+$POETRY_CMD env use "$PYENV_PYTHON_PATH" || {
+    echo "   Failed to use poetry env use, creating venv manually..."
+    $PYENV_PYTHON_PATH -m venv .venv
+}
 
 echo ""
 echo "📦 Installing Python dependencies..."
 echo "   (This includes TensorFlow with CUDA support as defined in pyproject.toml)"
-$POETRY_CMD install
+
+# Verify the venv was created with the correct Python
+if [ -f ".venv/bin/python" ]; then
+    VENV_PYTHON_VERSION=$(.venv/bin/python --version 2>&1 | awk '{print $2}')
+    echo "   Virtual environment Python version: $VENV_PYTHON_VERSION"
+
+    if [[ "$VENV_PYTHON_VERSION" =~ ^3\.11\. ]]; then
+        # Activate the venv and install with pip as a fallback
+        echo "   Installing dependencies using pip in venv..."
+        .venv/bin/pip install --upgrade pip setuptools wheel
+        .venv/bin/pip install -e .
+    else
+        echo "❌ ERROR: Virtual environment has wrong Python version: $VENV_PYTHON_VERSION"
+        exit 1
+    fi
+else
+    # Try Poetry install
+    $POETRY_CMD install
+fi
 
 echo ""
 echo "✅ Verifying GPU detection..."
-if $POETRY_CMD run python -c "import tensorflow as tf; gpus = tf.config.list_physical_devices('GPU'); print('GPU available:', len(gpus) > 0); print('GPU devices:', gpus); exit(0 if len(gpus) > 0 else 1)" 2>/dev/null; then
-    echo "✅ GPU detected successfully!"
+if [ -f ".venv/bin/python" ]; then
+    # Use venv Python directly
+    if .venv/bin/python -c "import tensorflow as tf; gpus = tf.config.list_physical_devices('GPU'); print('GPU available:', len(gpus) > 0); print('GPU devices:', gpus); exit(0 if len(gpus) > 0 else 1)" 2>/dev/null; then
+        echo "✅ GPU detected successfully!"
+    else
+        echo "⚠️  No GPU detected. Training will use CPU (much slower)."
+        echo "    If you have an NVIDIA GPU, ensure drivers are installed:"
+        echo "    nvidia-smi should show your GPU"
+    fi
 else
-    echo "⚠️  No GPU detected. Training will use CPU (much slower)."
-    echo "    If you have an NVIDIA GPU, ensure drivers are installed:"
-    echo "    nvidia-smi should show your GPU"
+    # Use Poetry
+    if $POETRY_CMD run python -c "import tensorflow as tf; gpus = tf.config.list_physical_devices('GPU'); print('GPU available:', len(gpus) > 0); print('GPU devices:', gpus); exit(0 if len(gpus) > 0 else 1)" 2>/dev/null; then
+        echo "✅ GPU detected successfully!"
+    else
+        echo "⚠️  No GPU detected. Training will use CPU (much slower)."
+        echo "    If you have an NVIDIA GPU, ensure drivers are installed:"
+        echo "    nvidia-smi should show your GPU"
+    fi
 fi
 
 echo ""
 echo "✅ Verifying CLI..."
-if $POETRY_CMD run bacterial-gan --help &> /dev/null; then
-    echo "✅ 'bacterial-gan' CLI is ready."
+if [ -f ".venv/bin/bacterial-gan" ]; then
+    # Use venv CLI directly
+    if .venv/bin/bacterial-gan --help &> /dev/null; then
+        echo "✅ 'bacterial-gan' CLI is ready."
+    else
+        echo "❌ CLI check failed. Something went wrong."
+        exit 1
+    fi
 else
-    echo "❌ CLI check failed. Something went wrong."
-    exit 1
+    # Use Poetry
+    if $POETRY_CMD run bacterial-gan --help &> /dev/null; then
+        echo "✅ 'bacterial-gan' CLI is ready."
+    else
+        echo "❌ CLI check failed. Something went wrong."
+        exit 1
+    fi
 fi
 
 echo ""
@@ -101,12 +288,27 @@ echo "Setup Complete!"
 echo "============================================="
 echo ""
 echo "Installed:"
+echo "  ✅ pyenv (Python version manager)"
+echo "  ✅ Python $REQUIRED_PYTHON_VERSION (via pyenv)"
 echo "  ✅ Poetry dependency manager"
 echo "  ✅ Python packages (TensorFlow, etc.)"
 echo ""
+echo "⚠️  IMPORTANT: If this is your first time installing pyenv:"
+echo "   Add pyenv to your shell config (~/.bashrc or ~/.zshrc):"
+echo "   export PYENV_ROOT=\"\$HOME/.pyenv\""
+echo "   command -v pyenv >/dev/null || export PATH=\"\$PYENV_ROOT/bin:\$PATH\""
+echo "   eval \"\$(pyenv init -)\""
+echo ""
+echo "   Then reload your shell: source ~/.bashrc (or source ~/.zshrc)"
+echo ""
 echo "Next steps:"
 echo "  1. Add dataset to: data/01_raw/"
-echo "  2. Start training: $POETRY_CMD run bacterial-gan train"
+if [ -f ".venv/bin/bacterial-gan" ]; then
+    echo "  2. Start training: .venv/bin/bacterial-gan train"
+    echo "     Or activate venv: source .venv/bin/activate && bacterial-gan train"
+else
+    echo "  2. Start training: $POETRY_CMD run bacterial-gan train"
+fi
 echo ""
 echo "To clean up everything later:"
 echo "  ./scripts/cleanup.sh"
