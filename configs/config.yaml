@@ -14,7 +14,7 @@ preprocessing:
   image_size: 256  # Patch size to extract from high-res images (256x256)
   apply_augmentation: false  # Apply traditional augmentation (rotations + flips, 8x multiplier)
   bg_threshold: 0.9  # Background filtering threshold (0.9 = discard patches with >90% white space)
-  max_patches_per_split: 10000 # Limit dataset size to prevent storage explosion
+  max_patches_per_split: 5000 # Limit dataset size to prevent storage explosion
 
   # Data splitting
   train_ratio: 0.7  # Training set ratio (70%)
