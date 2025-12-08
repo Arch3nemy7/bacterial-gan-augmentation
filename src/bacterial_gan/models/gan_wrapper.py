@@ -37,24 +37,29 @@ class ConditionalGAN:
         num_classes: int = 2,
         image_size: int = 128,
         channels: int = 3,
-        learning_rate: float = 0.0002,
-        beta1: float = 0.5,
+        learning_rate_g: float = 0.0002,
+        learning_rate_d: float = 0.00005,
+        learning_rate: float = 0.0001,  # Fallback for backward compatibility
+        beta1: float = 0.0,
         beta2: float = 0.9,
         loss_type: str = "wgan-gp",
         lambda_gp: float = 10.0,
-        n_critic: int = 5,
+        n_critic: int = 2,
         use_mixed_precision: bool = True
     ):
         """
-        Initialize Conditional GAN.
+        Initialize Conditional GAN with Two-Timescale Update Rule (TTUR).
 
         Args:
             latent_dim: Dimension of latent noise vector
             num_classes: Number of classes (2 for Gram +/-)
             image_size: Size of generated images
             channels: Number of image channels (3 for RGB)
-            learning_rate: Learning rate for both G and D
-            beta1: Beta1 parameter for Adam optimizer
+            learning_rate_g: Generator learning rate (TTUR: typically 4x faster than D)
+            learning_rate_d: Discriminator learning rate (TTUR: slower to prevent domination)
+            learning_rate: Fallback learning rate for backward compatibility
+            beta1: Beta1 parameter for Adam optimizer (0.0 for WGAN-GP)
+            beta2: Beta2 parameter for Adam optimizer
             loss_type: Type of GAN loss ("wgan-gp", "lsgan", "vanilla")
             lambda_gp: Gradient penalty coefficient for WGAN-GP
             n_critic: Number of discriminator updates per generator update
@@ -64,7 +69,9 @@ class ConditionalGAN:
         self.num_classes = num_classes
         self.image_size = image_size
         self.channels = channels
-        self.learning_rate = learning_rate
+        self.learning_rate_g = learning_rate_g
+        self.learning_rate_d = learning_rate_d
+        self.learning_rate = learning_rate  # Keep for backward compat
         self.beta1 = beta1
         self.beta2 = beta2
         self.loss_type = loss_type
@@ -96,17 +103,16 @@ class ConditionalGAN:
         # Get loss functions
         self.gen_loss_fn, self.disc_loss_fn = get_loss_functions(loss_type)
 
-        # Initialize optimizers with constant learning rate
-        # Note: Removed aggressive exponential decay that was causing learning rate collapse
-        # Previous decay (96% every 1000 steps) reduced LR from 0.0002 to 0.000038 after 130 epochs
-        # Constant LR allows stable long-term training for WGAN-GP
+        # Two-Timescale Update Rule (TTUR): Separate learning rates for G and D
+        # This prevents critic drift by allowing generator to learn faster
+        print(f"📊 TTUR Learning Rates: G={learning_rate_g}, D={learning_rate_d} (ratio {learning_rate_g/learning_rate_d:.1f}:1)")
         self.gen_optimizer = keras.optimizers.Adam(
-            learning_rate=learning_rate,
+            learning_rate=learning_rate_g,
             beta_1=beta1,
             beta_2=beta2
         )
         self.disc_optimizer = keras.optimizers.Adam(
-            learning_rate=learning_rate,
+            learning_rate=learning_rate_d,
             beta_1=beta1,
             beta_2=beta2
         )

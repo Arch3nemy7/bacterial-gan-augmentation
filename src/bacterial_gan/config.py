@@ -60,12 +60,17 @@ class TrainingConfig(BaseModel):
     channels: int = 3
     batch_size: int = 16
     epochs: int = 200
-    learning_rate: float = 0.0002
-    beta1: float = 0.5
+    
+    # Two-Timescale Update Rule (TTUR) - separate learning rates
+    learning_rate_g: float = 0.0002  # Generator learning rate (4x faster)
+    learning_rate_d: float = 0.00005  # Discriminator learning rate (slower)
+    learning_rate: float = 0.0001  # Fallback for backward compatibility
+    
+    beta1: float = 0.0  # Adam beta1 (0.0 for WGAN-GP)
     beta2: float = 0.9
     latent_dim: int = 100
     loss_type: str = "wgan-gp"
-    n_critic: int = 5
+    n_critic: int = 2  # Reduced from 5 to prevent critic drift
     lambda_gp: float = 10.0
     use_mixed_precision: bool = True
     memory_optimization: MemoryOptimizationConfig = MemoryOptimizationConfig()
