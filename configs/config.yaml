@@ -11,10 +11,10 @@ data:
 preprocessing:
   # Patch extraction settings (NEW: extracts patches instead of resizing)
   use_patch_extraction: true # If true, extracts all possible patches. If false, extracts a single random patch per image.
-  image_size: 128  # Patch size to extract from high-res images (128x128 for 4GB VRAM)
+  image_size: 256  # Patch size to extract from high-res images (256x256)
   apply_augmentation: false  # Apply traditional augmentation (rotations + flips, 8x multiplier)
   bg_threshold: 0.9  # Background filtering threshold (0.9 = discard patches with >90% white space)
-  max_patches_per_split: 5000 # Limit dataset size to prevent storage explosion
+  max_patches_per_split: 10000 # Limit dataset size to prevent storage explosion
 
   # Data splitting
   train_ratio: 0.7  # Training set ratio (70%)
@@ -30,15 +30,15 @@ preprocessing:
 
 training:
   # Model architecture
-  image_size: 128  # Input/output image size (must match preprocessing.image_size)
+  image_size: 256  # Input/output image size (must match preprocessing.image_size)
   num_classes: 2  # Number of bacterial classes (gram-positive, gram-negative)
   channels: 3  # RGB channels
   latent_dim: 100  # Dimension of noise vector for generator
 
   # Training hyperparameters
-  batch_size: 16  # Batch size for training (increased with 128x128 images)
+  batch_size: 8  # Batch size for training (reduced for 256x256 images to fit in memory)
   epochs: 300  # Total number of training epochs
-  learning_rate: 0.0002  # Learning rate for both generator and discriminator (standard for GANs)
+  learning_rate: 0.0001  # Learning rate (reduced for 256x256 to prevent instability)
   beta1: 0.0  # Adam optimizer beta1 parameter (0.0 for WGAN-GP)
   beta2: 0.9  # Adam optimizer beta2 parameter (0.9 for WGAN-GP)
 

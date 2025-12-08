@@ -168,6 +168,10 @@ class ConditionalGAN:
 
         # Update discriminator
         gradients = tape.gradient(disc_loss, self.discriminator.trainable_variables)
+
+        # Clip gradients to prevent explosion (especially important with mixed precision)
+        gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+
         self.disc_optimizer.apply_gradients(
             zip(gradients, self.discriminator.trainable_variables)
         )
@@ -200,6 +204,10 @@ class ConditionalGAN:
 
         # Update generator
         gradients = tape.gradient(gen_loss, self.generator.trainable_variables)
+
+        # Clip gradients to prevent explosion (especially important with mixed precision)
+        gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
+
         self.gen_optimizer.apply_gradients(
             zip(gradients, self.generator.trainable_variables)
         )
@@ -219,15 +227,35 @@ class ConditionalGAN:
         """
         batch_size = tf.shape(real_images)[0]
 
+        # Check for NaN in input data (debugging safety check)
+        if tf.reduce_any(tf.math.is_nan(real_images)) or tf.reduce_any(tf.math.is_inf(real_images)):
+            tf.print("WARNING: NaN or Inf detected in input images!")
+            # Replace NaN/Inf with zeros to prevent cascade
+            real_images = tf.where(tf.math.is_finite(real_images), real_images, tf.zeros_like(real_images))
+
         # Train discriminator n_critic times
         for _ in range(self.n_critic):
             disc_loss, gp = self.train_discriminator_step(real_images, class_labels)
+
+            # Check for NaN in discriminator losses
+            if tf.reduce_any(tf.math.is_nan(disc_loss)) or tf.reduce_any(tf.math.is_nan(gp)):
+                tf.print("WARNING: NaN detected in discriminator loss or GP!")
+                tf.print("  disc_loss:", disc_loss, "  gp:", gp)
+                # Skip this update and continue
+                continue
+
             self.disc_loss_metric.update_state(disc_loss)
             self.gp_metric.update_state(gp)
 
         # Train generator once
         gen_loss = self.train_generator_step(batch_size, class_labels)
-        self.gen_loss_metric.update_state(gen_loss)
+
+        # Check for NaN in generator loss
+        if tf.reduce_any(tf.math.is_nan(gen_loss)):
+            tf.print("WARNING: NaN detected in generator loss:", gen_loss)
+            # Don't update metric if NaN
+        else:
+            self.gen_loss_metric.update_state(gen_loss)
 
         return {
             "gen_loss": float(self.gen_loss_metric.result()),

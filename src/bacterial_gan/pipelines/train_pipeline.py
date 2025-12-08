@@ -165,7 +165,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             loss_type=settings.training.loss_type,
             lambda_gp=settings.training.lambda_gp,
             n_critic=settings.training.n_critic,
-            use_mixed_precision=True
+            use_mixed_precision=settings.training.use_mixed_precision
         )
         print()
 

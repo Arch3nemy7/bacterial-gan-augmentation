@@ -359,8 +359,14 @@ def gradient_penalty(discriminator, real_images, fake_images, class_labels, lamb
     # Calculate gradients of discriminator output w.r.t. interpolated images
     gradients = tape.gradient(pred, interpolated)
 
+    # Handle case where gradients might be None (shouldn't happen, but safety check)
+    if gradients is None:
+        return tf.constant(0.0, dtype=tf.float32)
+
     # Calculate L2 norm of gradients for each sample
-    gradients_norm = tf.sqrt(tf.reduce_sum(tf.square(gradients), axis=[1, 2, 3]))
+    # Add epsilon for numerical stability to prevent sqrt(0) issues
+    gradients_squared = tf.reduce_sum(tf.square(gradients), axis=[1, 2, 3])
+    gradients_norm = tf.sqrt(gradients_squared + 1e-8)
 
     # Gradient penalty: E[(||grad|| - 1)^2]
     gp = lambda_gp * tf.reduce_mean((gradients_norm - 1.0) ** 2)
