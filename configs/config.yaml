@@ -36,7 +36,7 @@ training:
   latent_dim: 100  # Dimension of noise vector for generator
 
   # Training hyperparameters
-  batch_size: 32  # Batch size for training (reduced for 256x256 images to fit in memory)
+  batch_size: 16  # Batch size for training (reduced to 16 to prevent OOM with high-capacity model)
   epochs: 300  # Total number of training epochs
   
   # Two-Timescale Update Rule (TTUR) - separate learning rates for G and D

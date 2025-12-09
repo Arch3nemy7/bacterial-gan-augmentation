@@ -173,11 +173,11 @@ def build_generator(
     channels: int = 3,
 ) -> keras.Model:
     """
-    Build conditional ResNet generator optimized for 24GB VRAM (High Capacity).
+    Build conditional ResNet generator optimized for 24GB VRAM (Balanced Capacity).
 
     Architecture:
     - ResNet design for robust gradient flow
-    - Doubled filter capacity for high-quality 256x256 generation
+    - Balanced filter capacity (256 base) to fit in memory with Batch Size 16 (FP32)
     - Self-attention at 32x32 for global coherence
     - Dynamic upsampling based on target image_size
 
@@ -201,40 +201,41 @@ def build_generator(
     # Combine noise and class embedding
     combined = layers.Concatenate()([noise_input, class_embedding])
 
-    # ========== INITIAL PROJECTION (High Capacity) ==========
-    # Project to 8x8x512 feature map (Doubled from 256)
-    x = layers.Dense(8 * 8 * 512, use_bias=False)(combined)
+    # ========== INITIAL PROJECTION (Balanced Capacity) ==========
+    # Project to 8x8x256 feature map (Standard capacity)
+    x = layers.Dense(8 * 8 * 256, use_bias=False)(combined)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
-    x = layers.Reshape((8, 8, 512))(x)
+    x = layers.Reshape((8, 8, 256))(x)
 
     # ========== UPSAMPLING PATH WITH RESIDUAL BLOCKS ==========
     
-    # 8x8 -> 16x16 (Filters: 512)
-    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-    x = residual_block(x, 512)
-    
-    # 16x16 -> 32x32 (Filters: 256 - was 192)
+    # 8x8 -> 16x16 (Filters: 256)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 256)
+    
+    # 16x16 -> 32x32 (Filters: 192)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = residual_block(x, 192)
 
     # ========== SELF-ATTENTION at 32x32 ==========
     # 32x32 is optimal for attention balance
-    x = SelfAttention(256)(x)
+    x = SelfAttention(192)(x)
     
-    # 32x32 -> 64x64 (Filters: 256 - was 128)
-    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-    x = residual_block(x, 256)
-
-    # 64x64 -> 128x128 (Filters: 128 - was 64)
+    # 32x32 -> 64x64 (Filters: 128)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 128)
 
+    # 64x64 -> 128x128 (Filters: 64)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = residual_block(x, 64)
+
     # ========== CONDITIONAL UPSAMPLING FOR 256x256 ==========
     if image_size == 256:
-        # 128x128 -> 256x256 (Filters: 64 - was 32)
+        # 128x128 -> 256x256 (Filters: 32)
+        # Reduced last layer filters to save memory (high resolution buffers are huge)
         x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-        x = residual_block(x, 64)
+        x = residual_block(x, 32)
 
     # ========== OUTPUT ==========
     output = layers.Conv2D(channels, 7, padding='same', activation='tanh', name='output')(x)
@@ -295,7 +296,7 @@ def build_discriminator(
     # Concatenate image with class channel
     x = layers.Concatenate()([x, class_embedding])
 
-    # ========== CONVOLUTIONAL LAYERS (Increased Capacity) ==========
+    # ========== CONVOLUTIONAL LAYERS (Balanced Capacity) ==========
     def conv_block(x, filters, kernel_size=4, strides=2, dropout_rate=0.3):
         """Convolutional block with dropout for regularization."""
         x = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')(x)
@@ -305,21 +306,22 @@ def build_discriminator(
         x = layers.Dropout(dropout_rate)(x)
         return x
 
-    # 256x256x4 -> 128x128x128 (or 128x128x4 -> 64x64x128)
+    # 256x256x4 -> 128x128x64 (Reduced from 128)
+    x = conv_block(x, 64, dropout_rate=0.25)
+
+    # -> 64x64x128 (Reduced from 256)
     x = conv_block(x, 128, dropout_rate=0.25)
-
-    # -> 64x64x256 (or 32x32x256)
-    x = conv_block(x, 256, dropout_rate=0.25)
     
-    # ========== SELF-ATTENTION at 64x64 or 32x32 ==========
-    # Adds global coherence check to the discriminator
-    x = SelfAttention(256)(x)
+    # ========== SELF-ATTENTION at 64x64 ==========
+    # Reduced channels for attention to save memory
+    x = SelfAttention(128)(x)
 
-    # -> 32x32x512 (or 16x16x512)
-    x = conv_block(x, 512, dropout_rate=0.3)
+    # -> 32x32x256 (Reduced from 512)
+    x = conv_block(x, 256, dropout_rate=0.3)
 
-    # -> 16x16x512 (or 8x8x512)
-    x = conv_block(x, 512, dropout_rate=0.3)
+    # -> 16x16x384 (Reduced from 512)
+    # Capped at 384 to prevent OOM
+    x = conv_block(x, 384, dropout_rate=0.3)
 
     # ========== MINIBATCH DISCRIMINATION ==========
     # Reduce spatial dimensions to keep parameter count manageable
