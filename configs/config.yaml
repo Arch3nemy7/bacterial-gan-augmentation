@@ -33,16 +33,16 @@ training:
   image_size: 256  # Input/output image size (must match preprocessing.image_size)
   num_classes: 2  # Number of bacterial classes (gram-positive, gram-negative)
   channels: 3  # RGB channels
-  latent_dim: 256  # Dimension of noise vector for generator (INCREASED from 100 for RTX 4090)
+  latent_dim: 256  # Dimension of noise vector for generator (rich representations)
 
-  # Training hyperparameters (OPTIMIZED FOR RTX 4090 - 24GB VRAM)
-  batch_size: 16  # Reduced to prevent OOM (increase gradually: 16→20→24 if stable)
+  # Training hyperparameters (OPTIMIZED FOR RTX 4070 Ti - 12GB VRAM)
+  batch_size: 12  # Balanced for 12GB VRAM (can try 14 if stable, 10 if OOM occurs)
   epochs: 300  # Total number of training epochs
 
   # Two-Timescale Update Rule (TTUR) - separate learning rates for G and D
   # Generator learns faster to prevent critic drift
-  learning_rate_g: 0.0001  # Generator learning rate (1x for high-capacity models)
-  learning_rate_d: 0.00005  # Discriminator learning rate (0.5x for high-capacity discriminator)
+  learning_rate_g: 0.0001  # Generator learning rate (1x for balanced models)
+  learning_rate_d: 0.00005  # Discriminator learning rate (0.5x for stability)
   learning_rate: 0.0001  # Fallback for backward compatibility (deprecated)
 
   beta1: 0.0  # Adam optimizer beta1 parameter (0.0 for WGAN-GP)
@@ -50,27 +50,27 @@ training:
 
   # GAN loss settings
   loss_type: "wgan-gp"  # Loss function: "wgan-gp", "lsgan", or "vanilla"
-  n_critic: 5  # Discriminator updates per generator update (INCREASED from 3 for high-capacity)
+  n_critic: 3  # Discriminator updates per generator update (balanced for 12GB VRAM)
   lambda_gp: 10.0  # Gradient penalty coefficient (for WGAN-GP)
 
-  # Performance settings (OPTIMIZED FOR RTX 4090)
-  use_mixed_precision: true  # Use mixed precision training (ENABLED - RTX 4090 has excellent FP16 performance)
+  # Performance settings (OPTIMIZED FOR RTX 4070 Ti)
+  use_mixed_precision: false  # Use mixed precision training (ENABLED - RTX 4070 Ti has excellent FP16 performance)
 
-  # Memory optimization settings (OPTIMIZED FOR 24GB VRAM)
+  # Memory optimization settings (OPTIMIZED FOR 12GB VRAM)
   memory_optimization:
     # GPU memory configuration
-    gpu_memory_growth: true  # Enable dynamic GPU memory allocation
-    gpu_memory_limit_mb: null  # No hard limit needed with 24GB VRAM
+    gpu_memory_growth: false  # Enable dynamic GPU memory allocation
+    gpu_memory_limit_mb: null  # No hard limit, but monitor usage on 12GB VRAM
 
     # CPU parallelization
-    cpu_threads: 16  # Number of CPU threads for data loading (INCREASED for better throughput)
+    cpu_threads: 12  # Number of CPU threads for data loading (balanced for typical systems)
 
-    # XLA compilation (DISABLED temporarily to avoid OOM during compilation)
-    enable_xla: false  # Disable if OOM occurs (XLA increases initial memory usage)
+    # XLA compilation (DISABLED to avoid OOM during compilation)
+    enable_xla: false  # Keep disabled - XLA increases initial memory usage significantly
 
     # Dataset pipeline optimization
     dataset_prefetch_buffer: -1  # Prefetch buffer size (-1 = AUTOTUNE)
-    dataset_cache_in_memory: true  # Cache dataset in RAM (RTX 4090 servers usually have plenty of RAM)
+    dataset_cache_in_memory: true  # Cache dataset in RAM (ensure system has sufficient RAM)
     dataset_cache_filename: null  # No disk caching needed with in-memory cache
 
   # Output and checkpointing

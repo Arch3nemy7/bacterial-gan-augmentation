@@ -173,18 +173,19 @@ def build_generator(
     channels: int = 3,
 ) -> keras.Model:
     """
-    Build conditional ResNet generator optimized for RTX 4090 (24GB VRAM, Balanced Capacity).
+    Build conditional ResNet generator optimized for RTX 4070 Ti (12GB VRAM).
 
-    Architecture Improvements for RTX 4090:
-    - 4x increased capacity: 512 base filters (vs 256 on GTX 1650)
-    - Deeper network: 2 residual blocks per resolution (vs 1)
-    - Dual self-attention: at 32x32 and 64x64 resolutions (memory-optimized)
-    - Larger latent space: 256 dimensions (vs 100)
-    - Optimized for 256x256 images with batch size 12-20
+    Architecture Optimizations for RTX 4070 Ti:
+    - Balanced capacity: 384 base filters (optimized for 12GB VRAM)
+    - Deep network: 2 residual blocks per resolution for quality
+    - Single self-attention: at 32x32 resolution (optimal for 256x256 images)
+    - Latent space: 256 dimensions for rich representations
+    - Optimized for 256x256 images with batch size 10-14
     - Designed for mixed precision (FP16) training
+    - Memory efficient while maintaining high quality output
 
     Args:
-        latent_dim: Dimension of latent noise vector (default: 256, increased from 100)
+        latent_dim: Dimension of latent noise vector (default: 256)
         num_classes: Number of classes for conditioning (default: 2)
         image_size: Output image size - must be 256 (default: 256)
         channels: Number of output channels (default: 3 for RGB)
@@ -206,44 +207,41 @@ def build_generator(
     # Combine noise and class embedding
     combined = layers.Concatenate()([noise_input, class_embedding])
 
-    # ========== INITIAL PROJECTION (HIGH CAPACITY) ==========
-    # Project to 8x8x512 feature map (4x capacity increase from GTX 1650)
-    x = layers.Dense(8 * 8 * 512, use_bias=False)(combined)
+    # ========== INITIAL PROJECTION (BALANCED CAPACITY) ==========
+    # Project to 8x8x384 feature map (optimized for RTX 4070 Ti)
+    x = layers.Dense(8 * 8 * 384, use_bias=False)(combined)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
-    x = layers.Reshape((8, 8, 512))(x)
+    x = layers.Reshape((8, 8, 384))(x)
 
     # Initial processing with 2 residual blocks
-    x = residual_block(x, 512)
-    x = residual_block(x, 512)
+    x = residual_block(x, 384)
+    x = residual_block(x, 384)
 
     # ========== UPSAMPLING PATH WITH DEEP RESIDUAL BLOCKS ==========
 
-    # 8x8 -> 16x16 (Filters: 512, 2x deeper)
-    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-    x = residual_block(x, 512)
-    x = residual_block(x, 512)
-
-    # 16x16 -> 32x32 (Filters: 384)
+    # 8x8 -> 16x16 (Filters: 384)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 384)
     x = residual_block(x, 384)
 
-    # ========== SELF-ATTENTION at 32x32 ==========
-    x = SelfAttention(384)(x)
-
-    # 32x32 -> 64x64 (Filters: 256)
+    # 16x16 -> 32x32 (Filters: 256)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 256)
     x = residual_block(x, 256)
 
-    # ========== SELF-ATTENTION at 64x64 ==========
+    # ========== SELF-ATTENTION at 32x32 (optimal for 256x256 images) ==========
     x = SelfAttention(256)(x)
 
-    # 64x64 -> 128x128 (Filters: 128)
+    # 32x32 -> 64x64 (Filters: 192)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-    x = residual_block(x, 128)
-    x = residual_block(x, 128)
+    x = residual_block(x, 192)
+    x = residual_block(x, 192)
+
+    # 64x64 -> 128x128 (Filters: 96)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = residual_block(x, 96)
+    x = residual_block(x, 96)
 
     # 128x128 -> 256x256 (Filters: 64, final high-resolution layer)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
@@ -273,15 +271,16 @@ def build_discriminator(
     num_classes: int = 2,
 ) -> keras.Model:
     """
-    Build conditional PatchGAN discriminator optimized for RTX 4090 (24GB VRAM, Balanced Capacity).
+    Build conditional PatchGAN discriminator optimized for RTX 4070 Ti (12GB VRAM).
 
-    Architecture Improvements for RTX 4090:
-    - 3x increased capacity: 96→192→384→512 filter progression (memory-optimized)
-    - Dual self-attention: at 64x64 and 32x32 resolutions
-    - Balanced depth: 4 conv layers for efficiency
+    Architecture Optimizations for RTX 4070 Ti:
+    - Balanced capacity: 64→128→256→384 filter progression (optimized for 12GB)
+    - Single self-attention: at 32x32 resolution (most impactful)
+    - Efficient depth: 4 conv layers for balance of quality and memory
     - Strong regularization: Dropout + GaussianNoise + MinibatchDiscrimination
-    - Optimized for 256x256 images with batch size 12-20
+    - Optimized for 256x256 images with batch size 10-14
     - Designed for mixed precision (FP16) training
+    - Memory efficient while preventing mode collapse
 
     Args:
         image_size: Input image size - must be 256 (default: 256)
@@ -321,37 +320,34 @@ def build_discriminator(
         x = layers.Dropout(dropout_rate)(x)
         return x
 
-    # 256x256x4 -> 128x128x96 (1.5x increase from 64, memory-efficient)
-    x = conv_block(x, 96, dropout_rate=0.2)
+    # 256x256x4 -> 128x128x64 (balanced capacity for 12GB VRAM)
+    x = conv_block(x, 64, dropout_rate=0.2)
 
-    # 128x128x96 -> 64x64x192 (2x increase)
-    x = conv_block(x, 192, dropout_rate=0.25)
+    # 128x128x64 -> 64x64x128
+    x = conv_block(x, 128, dropout_rate=0.25)
 
-    # ========== SELF-ATTENTION at 64x64 ==========
-    x = SelfAttention(192)(x)
+    # 64x64x128 -> 32x32x256
+    x = conv_block(x, 256, dropout_rate=0.3)
 
-    # 64x64x192 -> 32x32x384 (2x increase)
-    x = conv_block(x, 384, dropout_rate=0.3)
+    # ========== SELF-ATTENTION at 32x32 (optimal resolution) ==========
+    x = SelfAttention(256)(x)
 
-    # ========== SELF-ATTENTION at 32x32 ==========
-    x = SelfAttention(384)(x)
-
-    # 32x32x384 -> 16x16x512 (capped at 512 to prevent OOM)
-    x = conv_block(x, 512, dropout_rate=0.35)
+    # 32x32x256 -> 16x16x384 (final conv layer)
+    x = conv_block(x, 384, dropout_rate=0.35)
 
     # ========== MINIBATCH DISCRIMINATION ==========
     # Global pooling to reduce spatial dimensions
     pooled = layers.GlobalAveragePooling2D()(x)
 
-    # Minibatch discrimination with balanced capacity
-    mb_features = MinibatchDiscrimination(num_kernels=100, kernel_dim=8)(pooled)
+    # Minibatch discrimination (optimized for 12GB VRAM)
+    mb_features = MinibatchDiscrimination(num_kernels=75, kernel_dim=6)(pooled)
 
-    # Dense layers for final classification
-    dense = layers.Dense(384)(mb_features)
+    # Dense layers for final classification (reduced capacity)
+    dense = layers.Dense(256)(mb_features)
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.4)(dense)
 
-    dense = layers.Dense(192)(dense)
+    dense = layers.Dense(128)(dense)
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.3)(dense)
 
@@ -487,10 +483,10 @@ def build_cgan(
     loss_type: str = "wgan-gp",
 ):
     """
-    Build complete conditional GAN optimized for RTX 4090 (24GB VRAM).
+    Build complete conditional GAN optimized for RTX 4070 Ti (12GB VRAM).
 
     Args:
-        latent_dim: Latent noise dimension (default: 256, increased from 100)
+        latent_dim: Latent noise dimension (default: 256)
         num_classes: Number of classes for conditioning (default: 2)
         image_size: Image size (height = width, must be 256)
         channels: Number of image channels (default: 3)
