@@ -33,45 +33,45 @@ training:
   image_size: 256  # Input/output image size (must match preprocessing.image_size)
   num_classes: 2  # Number of bacterial classes (gram-positive, gram-negative)
   channels: 3  # RGB channels
-  latent_dim: 100  # Dimension of noise vector for generator
+  latent_dim: 256  # Dimension of noise vector for generator (INCREASED from 100 for RTX 4090)
 
-  # Training hyperparameters
-  batch_size: 16  # Batch size for training (reduced to 16 to prevent OOM with high-capacity model)
+  # Training hyperparameters (OPTIMIZED FOR RTX 4090 - 24GB VRAM)
+  batch_size: 32  # Batch size for training (INCREASED from 16, can try 48 if stable)
   epochs: 300  # Total number of training epochs
-  
+
   # Two-Timescale Update Rule (TTUR) - separate learning rates for G and D
   # Generator learns faster to prevent critic drift
-  learning_rate_g: 0.0001  # Generator learning rate (4x faster than D)
-  learning_rate_d: 0.0001  # Discriminator learning rate (slower to prevent domination)
+  learning_rate_g: 0.0001  # Generator learning rate (1x for high-capacity models)
+  learning_rate_d: 0.00005  # Discriminator learning rate (0.5x for high-capacity discriminator)
   learning_rate: 0.0001  # Fallback for backward compatibility (deprecated)
-  
+
   beta1: 0.0  # Adam optimizer beta1 parameter (0.0 for WGAN-GP)
   beta2: 0.9  # Adam optimizer beta2 parameter (0.9 for WGAN-GP)
 
   # GAN loss settings
   loss_type: "wgan-gp"  # Loss function: "wgan-gp", "lsgan", or "vanilla"
-  n_critic: 3  # Reduced from 5 to prevent critic drift (modern WGAN-GP practice)
+  n_critic: 5  # Discriminator updates per generator update (INCREASED from 3 for high-capacity)
   lambda_gp: 10.0  # Gradient penalty coefficient (for WGAN-GP)
 
-  # Performance settings
-  use_mixed_precision: false  # Use mixed precision training (faster on modern GPUs)
+  # Performance settings (OPTIMIZED FOR RTX 4090)
+  use_mixed_precision: true  # Use mixed precision training (ENABLED - RTX 4090 has excellent FP16 performance)
 
-  # Memory optimization settings
+  # Memory optimization settings (OPTIMIZED FOR 24GB VRAM)
   memory_optimization:
     # GPU memory configuration
-    gpu_memory_growth: true  # Enable dynamic GPU memory allocation (recommended for 4GB VRAM)
-    gpu_memory_limit_mb: null  # Hard GPU memory limit in MB (null = use growth instead, e.g., 3072 for 3GB limit)
+    gpu_memory_growth: true  # Enable dynamic GPU memory allocation
+    gpu_memory_limit_mb: null  # No hard limit needed with 24GB VRAM
 
     # CPU parallelization
-    cpu_threads: 12  # Number of CPU threads for data loading (null = auto-detect)
+    cpu_threads: 16  # Number of CPU threads for data loading (INCREASED for better throughput)
 
-    # XLA compilation
-    enable_xla: false  # Enable XLA compilation (⚠️ DISABLE for 4GB VRAM to prevent OOM, enable for >8GB VRAM)
+    # XLA compilation (ENABLED for RTX 4090)
+    enable_xla: true  # Enable XLA compilation for 15-30% speed boost on RTX 4090
 
     # Dataset pipeline optimization
-    dataset_prefetch_buffer: -1  # Prefetch buffer size (-1 = AUTOTUNE, or set to specific value like 2)
-    dataset_cache_in_memory: false  # Cache dataset in RAM (only for small datasets <1GB)
-    dataset_cache_filename: null  # Disk-based cache file path (null = no disk caching, e.g., "data/cache/train.tfcache")
+    dataset_prefetch_buffer: -1  # Prefetch buffer size (-1 = AUTOTUNE)
+    dataset_cache_in_memory: true  # Cache dataset in RAM (RTX 4090 servers usually have plenty of RAM)
+    dataset_cache_filename: null  # No disk caching needed with in-memory cache
 
   # Output and checkpointing
   checkpoint_interval: 50  # Save model checkpoint every N epochs

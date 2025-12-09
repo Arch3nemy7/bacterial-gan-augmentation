@@ -1,4 +1,4 @@
-"""GAN architecture optimized for bacterial image generation (GTX 1650)."""
+"""GAN architecture optimized for bacterial image generation (RTX 4090 - 24GB VRAM)."""
 
 import tensorflow as tf
 from tensorflow import keras
@@ -167,77 +167,94 @@ def residual_block(x, filters, kernel_size=3, stride=1):
 
 
 def build_generator(
-    latent_dim: int = 100,
+    latent_dim: int = 256,
     num_classes: int = 2,
-    image_size: int = 128,
+    image_size: int = 256,
     channels: int = 3,
 ) -> keras.Model:
     """
-    Build conditional ResNet generator optimized for 24GB VRAM (Balanced Capacity).
+    Build conditional ResNet generator optimized for RTX 4090 (24GB VRAM, High Capacity).
 
-    Architecture:
-    - ResNet design for robust gradient flow
-    - Balanced filter capacity (256 base) to fit in memory with Batch Size 16 (FP32)
-    - Self-attention at 32x32 for global coherence
-    - Dynamic upsampling based on target image_size
+    Architecture Improvements for RTX 4090:
+    - 4x increased capacity: 512 base filters (vs 256 on GTX 1650)
+    - Deeper network: 2 residual blocks per resolution (vs 1)
+    - Multi-scale self-attention: at 32x32, 64x64, and 128x128 resolutions
+    - Larger latent space: 256 dimensions (vs 100)
+    - Optimized for 256x256 images with batch size 32-48
+    - Designed for mixed precision (FP16) training
 
     Args:
-        latent_dim: Dimension of latent noise vector (default: 100)
+        latent_dim: Dimension of latent noise vector (default: 256, increased from 100)
         num_classes: Number of classes for conditioning (default: 2)
-        image_size: Output image size - 128 or 256 (default: 128)
+        image_size: Output image size - must be 256 (default: 256)
         channels: Number of output channels (default: 3 for RGB)
 
     Returns:
         Keras Model: Generator that takes [noise, class_label] and outputs images
     """
+    if image_size != 256:
+        raise ValueError(f"This generator is optimized for 256x256 images, got {image_size}")
+
     # ========== INPUTS ==========
     noise_input = layers.Input(shape=(latent_dim,), name='noise')
     class_input = layers.Input(shape=(1,), dtype='int32', name='class_label')
 
-    # Embed class label to latent space
+    # Embed class label to latent space (larger embedding)
     class_embedding = layers.Embedding(num_classes, latent_dim)(class_input)
     class_embedding = layers.Flatten()(class_embedding)
 
     # Combine noise and class embedding
     combined = layers.Concatenate()([noise_input, class_embedding])
 
-    # ========== INITIAL PROJECTION (Balanced Capacity) ==========
-    # Project to 8x8x256 feature map (Standard capacity)
-    x = layers.Dense(8 * 8 * 256, use_bias=False)(combined)
+    # ========== INITIAL PROJECTION (HIGH CAPACITY) ==========
+    # Project to 8x8x512 feature map (4x capacity increase from GTX 1650)
+    x = layers.Dense(8 * 8 * 512, use_bias=False)(combined)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
-    x = layers.Reshape((8, 8, 256))(x)
+    x = layers.Reshape((8, 8, 512))(x)
 
-    # ========== UPSAMPLING PATH WITH RESIDUAL BLOCKS ==========
-    
-    # 8x8 -> 16x16 (Filters: 256)
+    # Initial processing with 2 residual blocks
+    x = residual_block(x, 512)
+    x = residual_block(x, 512)
+
+    # ========== UPSAMPLING PATH WITH DEEP RESIDUAL BLOCKS ==========
+
+    # 8x8 -> 16x16 (Filters: 512, 2x deeper)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-    x = residual_block(x, 256)
-    
-    # 16x16 -> 32x32 (Filters: 192)
+    x = residual_block(x, 512)
+    x = residual_block(x, 512)
+
+    # 16x16 -> 32x32 (Filters: 384)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-    x = residual_block(x, 192)
+    x = residual_block(x, 384)
+    x = residual_block(x, 384)
 
     # ========== SELF-ATTENTION at 32x32 ==========
-    # 32x32 is optimal for attention balance
-    x = SelfAttention(192)(x)
-    
-    # 32x32 -> 64x64 (Filters: 128)
+    x = SelfAttention(384)(x)
+
+    # 32x32 -> 64x64 (Filters: 256)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = residual_block(x, 256)
+    x = residual_block(x, 256)
+
+    # ========== SELF-ATTENTION at 64x64 ==========
+    x = SelfAttention(256)(x)
+
+    # 64x64 -> 128x128 (Filters: 128)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 128)
+    x = residual_block(x, 128)
 
-    # 64x64 -> 128x128 (Filters: 64)
+    # ========== SELF-ATTENTION at 128x128 ==========
+    x = SelfAttention(128)(x)
+
+    # 128x128 -> 256x256 (Filters: 64, final high-resolution layer)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 64)
-
-    # ========== CONDITIONAL UPSAMPLING FOR 256x256 ==========
-    if image_size == 256:
-        # 128x128 -> 256x256 (Filters: 32)
-        # Reduced last layer filters to save memory (high resolution buffers are huge)
-        x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-        x = residual_block(x, 32)
+    x = residual_block(x, 64)
 
     # ========== OUTPUT ==========
+    # Larger kernel for better texture synthesis at high resolution
     output = layers.Conv2D(channels, 7, padding='same', activation='tanh', name='output')(x)
 
     model = keras.Model(
@@ -254,86 +271,96 @@ def build_generator(
 # ============================================================================
 
 def build_discriminator(
-    image_size: int = 128,
+    image_size: int = 256,
     channels: int = 3,
     num_classes: int = 2,
 ) -> keras.Model:
     """
-    Build conditional PatchGAN discriminator with anti-mode-collapse features.
+    Build conditional PatchGAN discriminator optimized for RTX 4090 (24GB VRAM, High Capacity).
 
-    Architecture:
-    - GaussianNoise input to prevent memorization
-    - Increased filter capacity (128→256→512→512)
-    - Dropout for regularization
-    - MinibatchDiscrimination to detect mode collapse
-    - Class conditioning via embedding concatenation
-    - PatchGAN output for local texture discrimination
+    Architecture Improvements for RTX 4090:
+    - 4x increased capacity: 128→256→512→768→1024 filter progression
+    - Multi-scale self-attention: at 128x128, 64x64, and 32x32 resolutions
+    - Deeper layers: Additional conv blocks for better feature extraction
+    - Stronger regularization: Dropout + GaussianNoise + MinibatchDiscrimination
+    - Optimized for 256x256 images with batch size 32-48
+    - Designed for mixed precision (FP16) training
 
     Args:
-        image_size: Input image size - 128 or 256 (default: 128)
+        image_size: Input image size - must be 256 (default: 256)
         channels: Number of input channels (default: 3)
         num_classes: Number of classes (default: 2)
 
     Returns:
-        Keras Model: Discriminator that takes [image, class_label] and outputs validity map
+        Keras Model: Discriminator that takes [image, class_label] and outputs validity score
     """
+    if image_size != 256:
+        raise ValueError(f"This discriminator is optimized for 256x256 images, got {image_size}")
+
     # ========== INPUTS ==========
     image_input = layers.Input(shape=(image_size, image_size, channels), name='image')
     class_input = layers.Input(shape=(1,), dtype='int32', name='class_label')
 
     # ========== INPUT NOISE (prevents memorization) ==========
-    x = GaussianNoise(stddev=0.1)(image_input)
+    x = GaussianNoise(stddev=0.05)(image_input)  # Reduced noise for high-capacity model
 
     # Embed class label
-    # Map class index to a learnable scalar value (1 dimension)
-    class_embedding = layers.Embedding(num_classes, 1, name='class_emb')(class_input) # [B, 1, 1]
-    class_embedding = layers.Flatten()(class_embedding) # [B, 1]
-    class_embedding = layers.Reshape((1, 1, 1))(class_embedding) # [B, 1, 1, 1]
-    
-    # Tile to match image spatial dimensions (Parameter-free!)
-    class_embedding = layers.Lambda(lambda x: tf.tile(x, [1, image_size, image_size, 1]))(class_embedding) # [B, H, W, 1]
+    class_embedding = layers.Embedding(num_classes, 1, name='class_emb')(class_input)
+    class_embedding = layers.Flatten()(class_embedding)
+    class_embedding = layers.Reshape((1, 1, 1))(class_embedding)
+
+    # Tile to match image spatial dimensions
+    class_embedding = layers.Lambda(lambda x: tf.tile(x, [1, image_size, image_size, 1]))(class_embedding)
 
     # Concatenate image with class channel
     x = layers.Concatenate()([x, class_embedding])
 
-    # ========== CONVOLUTIONAL LAYERS (Balanced Capacity) ==========
+    # ========== CONVOLUTIONAL LAYERS (HIGH CAPACITY) ==========
     def conv_block(x, filters, kernel_size=4, strides=2, dropout_rate=0.3):
-        """Convolutional block with dropout for regularization."""
+        """Convolutional block with LayerNorm and dropout."""
         x = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')(x)
-        # Layer Normalization is preferred for WGAN-GP over Batch Normalization
         x = layers.LayerNormalization()(x)
         x = layers.LeakyReLU(0.2)(x)
         x = layers.Dropout(dropout_rate)(x)
         return x
 
-    # 256x256x4 -> 128x128x64 (Reduced from 128)
-    x = conv_block(x, 64, dropout_rate=0.25)
+    # 256x256x4 -> 128x128x128 (4x increase from 64)
+    x = conv_block(x, 128, dropout_rate=0.2)
 
-    # -> 64x64x128 (Reduced from 256)
-    x = conv_block(x, 128, dropout_rate=0.25)
-    
-    # ========== SELF-ATTENTION at 64x64 ==========
-    # Reduced channels for attention to save memory
+    # ========== SELF-ATTENTION at 128x128 (NEW!) ==========
     x = SelfAttention(128)(x)
 
-    # -> 32x32x256 (Reduced from 512)
-    x = conv_block(x, 256, dropout_rate=0.3)
+    # 128x128x128 -> 64x64x256 (2x increase from 128)
+    x = conv_block(x, 256, dropout_rate=0.25)
 
-    # -> 16x16x384 (Reduced from 512)
-    # Capped at 384 to prevent OOM
-    x = conv_block(x, 384, dropout_rate=0.3)
+    # ========== SELF-ATTENTION at 64x64 ==========
+    x = SelfAttention(256)(x)
+
+    # 64x64x256 -> 32x32x512 (2x increase from 256)
+    x = conv_block(x, 512, dropout_rate=0.3)
+
+    # ========== SELF-ATTENTION at 32x32 ==========
+    x = SelfAttention(512)(x)
+
+    # 32x32x512 -> 16x16x768 (2x increase from 384)
+    x = conv_block(x, 768, dropout_rate=0.35)
+
+    # 16x16x768 -> 8x8x1024 (3x increase from 384, NEW LAYER!)
+    x = conv_block(x, 1024, dropout_rate=0.4)
 
     # ========== MINIBATCH DISCRIMINATION ==========
-    # Reduce spatial dimensions to keep parameter count manageable
-    # 16x16x512 (131k features) -> 512 features
-    # This prevents the MinibatchDiscrimination layer from having 65M+ parameters
+    # Global pooling to reduce spatial dimensions
     pooled = layers.GlobalAveragePooling2D()(x)
-    
-    # Minibatch discrimination to detect mode collapse
-    mb_features = MinibatchDiscrimination(num_kernels=100, kernel_dim=5)(pooled)
-    
-    # Dense layer before output
-    dense = layers.Dense(256)(mb_features)
+
+    # Stronger minibatch discrimination with more kernels
+    mb_features = MinibatchDiscrimination(num_kernels=200, kernel_dim=10)(pooled)
+
+    # Deeper dense layers for final classification
+    dense = layers.Dense(512)(mb_features)
+    dense = layers.LeakyReLU(0.2)(dense)
+    dense = layers.Dropout(0.4)(dense)
+
+    dense = layers.Dense(256)(dense)
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.3)(dense)
 
@@ -462,20 +489,20 @@ def gradient_penalty(discriminator, real_images, fake_images, class_labels, lamb
 # ============================================================================
 
 def build_cgan(
-    latent_dim: int = 100,
+    latent_dim: int = 256,
     num_classes: int = 2,
-    image_size: int = 128,
+    image_size: int = 256,
     channels: int = 3,
     loss_type: str = "wgan-gp",
 ):
     """
-    Build complete conditional GAN with generator and discriminator.
+    Build complete conditional GAN optimized for RTX 4090 (24GB VRAM).
 
     Args:
-        latent_dim: Latent noise dimension
-        num_classes: Number of classes for conditioning
-        image_size: Image size (height = width)
-        channels: Number of image channels
+        latent_dim: Latent noise dimension (default: 256, increased from 100)
+        num_classes: Number of classes for conditioning (default: 2)
+        image_size: Image size (height = width, must be 256)
+        channels: Number of image channels (default: 3)
         loss_type: Loss function type ('wgan-gp', 'lsgan', 'vanilla')
 
     Returns:
