@@ -173,14 +173,14 @@ def build_generator(
     channels: int = 3,
 ) -> keras.Model:
     """
-    Build conditional ResNet generator optimized for RTX 4090 (24GB VRAM, High Capacity).
+    Build conditional ResNet generator optimized for RTX 4090 (24GB VRAM, Balanced Capacity).
 
     Architecture Improvements for RTX 4090:
     - 4x increased capacity: 512 base filters (vs 256 on GTX 1650)
     - Deeper network: 2 residual blocks per resolution (vs 1)
-    - Multi-scale self-attention: at 32x32, 64x64, and 128x128 resolutions
+    - Dual self-attention: at 32x32 and 64x64 resolutions (memory-optimized)
     - Larger latent space: 256 dimensions (vs 100)
-    - Optimized for 256x256 images with batch size 32-48
+    - Optimized for 256x256 images with batch size 12-20
     - Designed for mixed precision (FP16) training
 
     Args:
@@ -245,9 +245,6 @@ def build_generator(
     x = residual_block(x, 128)
     x = residual_block(x, 128)
 
-    # ========== SELF-ATTENTION at 128x128 ==========
-    x = SelfAttention(128)(x)
-
     # 128x128 -> 256x256 (Filters: 64, final high-resolution layer)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 64)
@@ -276,14 +273,14 @@ def build_discriminator(
     num_classes: int = 2,
 ) -> keras.Model:
     """
-    Build conditional PatchGAN discriminator optimized for RTX 4090 (24GB VRAM, High Capacity).
+    Build conditional PatchGAN discriminator optimized for RTX 4090 (24GB VRAM, Balanced Capacity).
 
     Architecture Improvements for RTX 4090:
-    - 4x increased capacity: 128→256→512→768→1024 filter progression
-    - Multi-scale self-attention: at 128x128, 64x64, and 32x32 resolutions
-    - Deeper layers: Additional conv blocks for better feature extraction
-    - Stronger regularization: Dropout + GaussianNoise + MinibatchDiscrimination
-    - Optimized for 256x256 images with batch size 32-48
+    - 3x increased capacity: 96→192→384→512 filter progression (memory-optimized)
+    - Dual self-attention: at 64x64 and 32x32 resolutions
+    - Balanced depth: 4 conv layers for efficiency
+    - Strong regularization: Dropout + GaussianNoise + MinibatchDiscrimination
+    - Optimized for 256x256 images with batch size 12-20
     - Designed for mixed precision (FP16) training
 
     Args:
@@ -315,7 +312,7 @@ def build_discriminator(
     # Concatenate image with class channel
     x = layers.Concatenate()([x, class_embedding])
 
-    # ========== CONVOLUTIONAL LAYERS (HIGH CAPACITY) ==========
+    # ========== CONVOLUTIONAL LAYERS (MEMORY-OPTIMIZED) ==========
     def conv_block(x, filters, kernel_size=4, strides=2, dropout_rate=0.3):
         """Convolutional block with LayerNorm and dropout."""
         x = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')(x)
@@ -324,43 +321,37 @@ def build_discriminator(
         x = layers.Dropout(dropout_rate)(x)
         return x
 
-    # 256x256x4 -> 128x128x128 (4x increase from 64)
-    x = conv_block(x, 128, dropout_rate=0.2)
+    # 256x256x4 -> 128x128x96 (1.5x increase from 64, memory-efficient)
+    x = conv_block(x, 96, dropout_rate=0.2)
 
-    # ========== SELF-ATTENTION at 128x128 (NEW!) ==========
-    x = SelfAttention(128)(x)
-
-    # 128x128x128 -> 64x64x256 (2x increase from 128)
-    x = conv_block(x, 256, dropout_rate=0.25)
+    # 128x128x96 -> 64x64x192 (2x increase)
+    x = conv_block(x, 192, dropout_rate=0.25)
 
     # ========== SELF-ATTENTION at 64x64 ==========
-    x = SelfAttention(256)(x)
+    x = SelfAttention(192)(x)
 
-    # 64x64x256 -> 32x32x512 (2x increase from 256)
-    x = conv_block(x, 512, dropout_rate=0.3)
+    # 64x64x192 -> 32x32x384 (2x increase)
+    x = conv_block(x, 384, dropout_rate=0.3)
 
     # ========== SELF-ATTENTION at 32x32 ==========
-    x = SelfAttention(512)(x)
+    x = SelfAttention(384)(x)
 
-    # 32x32x512 -> 16x16x768 (2x increase from 384)
-    x = conv_block(x, 768, dropout_rate=0.35)
-
-    # 16x16x768 -> 8x8x1024 (3x increase from 384, NEW LAYER!)
-    x = conv_block(x, 1024, dropout_rate=0.4)
+    # 32x32x384 -> 16x16x512 (capped at 512 to prevent OOM)
+    x = conv_block(x, 512, dropout_rate=0.35)
 
     # ========== MINIBATCH DISCRIMINATION ==========
     # Global pooling to reduce spatial dimensions
     pooled = layers.GlobalAveragePooling2D()(x)
 
-    # Stronger minibatch discrimination with more kernels
-    mb_features = MinibatchDiscrimination(num_kernels=200, kernel_dim=10)(pooled)
+    # Minibatch discrimination with balanced capacity
+    mb_features = MinibatchDiscrimination(num_kernels=100, kernel_dim=8)(pooled)
 
-    # Deeper dense layers for final classification
-    dense = layers.Dense(512)(mb_features)
+    # Dense layers for final classification
+    dense = layers.Dense(384)(mb_features)
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.4)(dense)
 
-    dense = layers.Dense(256)(dense)
+    dense = layers.Dense(192)(dense)
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.3)(dense)
 

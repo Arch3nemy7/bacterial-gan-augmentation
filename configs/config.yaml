@@ -36,7 +36,7 @@ training:
   latent_dim: 256  # Dimension of noise vector for generator (INCREASED from 100 for RTX 4090)
 
   # Training hyperparameters (OPTIMIZED FOR RTX 4090 - 24GB VRAM)
-  batch_size: 32  # Batch size for training (INCREASED from 16, can try 48 if stable)
+  batch_size: 16  # Reduced to prevent OOM (increase gradually: 16→20→24 if stable)
   epochs: 300  # Total number of training epochs
 
   # Two-Timescale Update Rule (TTUR) - separate learning rates for G and D
@@ -65,8 +65,8 @@ training:
     # CPU parallelization
     cpu_threads: 16  # Number of CPU threads for data loading (INCREASED for better throughput)
 
-    # XLA compilation (ENABLED for RTX 4090)
-    enable_xla: true  # Enable XLA compilation for 15-30% speed boost on RTX 4090
+    # XLA compilation (DISABLED temporarily to avoid OOM during compilation)
+    enable_xla: false  # Disable if OOM occurs (XLA increases initial memory usage)
 
     # Dataset pipeline optimization
     dataset_prefetch_buffer: -1  # Prefetch buffer size (-1 = AUTOTUNE)
