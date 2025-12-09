@@ -42,7 +42,7 @@ training:
   # Two-Timescale Update Rule (TTUR) - separate learning rates for G and D
   # Generator learns faster to prevent critic drift
   learning_rate_g: 0.0001  # Generator learning rate (4x faster than D)
-  learning_rate_d: 0.0001  # Discriminator learning rate (slower to prevent domination)
+  learning_rate_d: 0.0002  # Discriminator learning rate (slower to prevent domination)
   learning_rate: 0.0001  # Fallback for backward compatibility (deprecated)
   
   beta1: 0.0  # Adam optimizer beta1 parameter (0.0 for WGAN-GP)
@@ -50,7 +50,7 @@ training:
 
   # GAN loss settings
   loss_type: "wgan-gp"  # Loss function: "wgan-gp", "lsgan", or "vanilla"
-  n_critic: 3  # Reduced from 5 to prevent critic drift (modern WGAN-GP practice)
+  n_critic: 5  # Reduced from 5 to prevent critic drift (modern WGAN-GP practice)
   lambda_gp: 10.0  # Gradient penalty coefficient (for WGAN-GP)
 
   # Performance settings
