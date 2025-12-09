@@ -133,6 +133,67 @@ class GaussianNoise(layers.Layer):
         return inputs
 
 
+class SpectralNormalization(layers.Wrapper):
+    """
+    Spectral Normalization Wrapper.
+    
+    Stabilizes GAN training by constraining the Lipschitz constant of the discriminator.
+    Reference: Miyato et al. "Spectral Normalization for Generative Adversarial Networks"
+    """
+    def __init__(self, layer, iteration=1, **kwargs):
+        super(SpectralNormalization, self).__init__(layer, **kwargs)
+        self.iteration = iteration
+
+    def build(self, input_shape):
+        if not self.layer.built:
+            self.layer.build(input_shape)
+
+        if hasattr(self.layer, 'kernel'):
+            self.w = self.layer.kernel
+        elif hasattr(self.layer, 'embeddings'):
+            self.w = self.layer.embeddings
+        else:
+            raise ValueError("Layer must have a kernel or embeddings weights")
+
+        self.w_shape = self.w.shape.as_list()
+        self.u = self.add_weight(
+            shape=(1, self.w_shape[-1]),
+            initializer=tf.initializers.TruncatedNormal(stddev=0.02),
+            trainable=False,
+            name='sn_u',
+            dtype=self.w.dtype
+        )
+
+        super(SpectralNormalization, self).build(input_shape)
+
+    def call(self, inputs, training=None):
+        self.update_weights()
+        output = self.layer(inputs)
+        self.restore_weights() 
+        return output
+
+    def update_weights(self):
+        w_reshaped = tf.reshape(self.w, [-1, self.w_shape[-1]])
+        u_hat = self.u
+
+        for _ in range(self.iteration):
+            v_hat = tf.nn.l2_normalize(tf.matmul(u_hat, w_reshaped, transpose_b=True))
+            u_hat = tf.nn.l2_normalize(tf.matmul(v_hat, w_reshaped))
+
+        sigma = tf.matmul(tf.matmul(v_hat, w_reshaped), u_hat, transpose_b=True)
+        
+        self.u.assign(u_hat)
+        self.w.assign(self.w / sigma)
+        self.sigma = sigma
+
+    def restore_weights(self):
+        self.w.assign(self.w * self.sigma)
+    
+    def compute_output_shape(self, input_shape):
+        return self.layer.compute_output_shape(input_shape)
+
+
+
 # ============================================================================
 # GENERATOR (ResNet for 128x128 or 256x256 images)
 # ============================================================================
@@ -314,11 +375,13 @@ def build_discriminator(
     # ========== CONVOLUTIONAL LAYERS (MEMORY-OPTIMIZED) ==========
     def conv_block(x, filters, kernel_size=4, strides=2, dropout_rate=0.3):
         """Convolutional block with LayerNorm and dropout."""
-        x = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')(x)
+        # Wrap Conv2D with SpectralNormalization
+        x = SpectralNormalization(layers.Conv2D(filters, kernel_size, strides=strides, padding='same'))(x)
         x = layers.LayerNormalization()(x)
         x = layers.LeakyReLU(0.2)(x)
         x = layers.Dropout(dropout_rate)(x)
         return x
+
 
     # 256x256x4 -> 128x128x64 (balanced capacity for 12GB VRAM)
     x = conv_block(x, 64, dropout_rate=0.2)
@@ -343,17 +406,19 @@ def build_discriminator(
     mb_features = MinibatchDiscrimination(num_kernels=75, kernel_dim=6)(pooled)
 
     # Dense layers for final classification (reduced capacity)
-    dense = layers.Dense(256)(mb_features)
+    # Apply SpectralNormalization to Dense layers too
+    dense = SpectralNormalization(layers.Dense(256))(mb_features)
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.4)(dense)
 
-    dense = layers.Dense(128)(dense)
+    dense = SpectralNormalization(layers.Dense(128))(dense)
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.3)(dense)
 
     # ========== OUTPUT ==========
     # Single validity score (for WGAN, no activation)
-    validity = layers.Dense(1, name='validity')(dense)
+    validity = SpectralNormalization(layers.Dense(1, name='validity'))(dense)
+
 
     model = keras.Model(
         inputs=[image_input, class_input],
