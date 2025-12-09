@@ -64,6 +64,75 @@ class SelfAttention(layers.Layer):
         return self.gamma * out + inputs
 
 
+class MinibatchDiscrimination(layers.Layer):
+    """
+    Minibatch Discrimination layer to detect mode collapse.
+    
+    Compares each sample to all other samples in the batch to detect
+    if the generator is producing similar images (mode collapse).
+    
+    Reference: Salimans et al. "Improved Techniques for Training GANs"
+    """
+    
+    def __init__(self, num_kernels=50, kernel_dim=5, **kwargs):
+        super().__init__(**kwargs)
+        self.num_kernels = num_kernels
+        self.kernel_dim = kernel_dim
+    
+    def build(self, input_shape):
+        self.input_dim = int(input_shape[-1])
+        # Tensor T with shape [input_dim, num_kernels * kernel_dim]
+        self.T = self.add_weight(
+            name='T',
+            shape=(self.input_dim, self.num_kernels * self.kernel_dim),
+            initializer='glorot_uniform',
+            trainable=True
+        )
+        super().build(input_shape)
+    
+    def call(self, x):
+        # x shape: [batch, features]
+        # M shape: [batch, num_kernels, kernel_dim]
+        M = tf.reshape(
+            tf.matmul(x, self.T),
+            [-1, self.num_kernels, self.kernel_dim]
+        )
+        
+        # Compute L1 distance between all pairs in batch
+        # M_i - M_j for all pairs
+        M_expanded = tf.expand_dims(M, 0)  # [1, batch, num_kernels, kernel_dim]
+        M_transposed = tf.expand_dims(M, 1)  # [batch, 1, num_kernels, kernel_dim]
+        
+        # L1 distance
+        diffs = tf.reduce_sum(tf.abs(M_expanded - M_transposed), axis=3)  # [batch, batch, num_kernels]
+        
+        # Apply negative exponential
+        c = tf.exp(-diffs)  # [batch, batch, num_kernels]
+        
+        # Sum over batch dimension (excluding self)
+        # o(x_i) = sum_{j != i} c(x_i, x_j)
+        o = tf.reduce_sum(c, axis=1) - 1  # Subtract 1 to exclude self-comparison
+        
+        # Concatenate with original features
+        return tf.concat([x, o], axis=-1)
+
+
+class GaussianNoise(layers.Layer):
+    """
+    Gaussian noise layer for discriminator input.
+    Helps prevent discriminator from memorizing training data.
+    """
+    
+    def __init__(self, stddev=0.1, **kwargs):
+        super().__init__(**kwargs)
+        self.stddev = stddev
+    
+    def call(self, inputs, training=None):
+        if training:
+            return inputs + tf.random.normal(tf.shape(inputs), stddev=self.stddev)
+        return inputs
+
+
 # ============================================================================
 # GENERATOR (ResNet for 128x128 or 256x256 images)
 # ============================================================================
@@ -104,13 +173,12 @@ def build_generator(
     channels: int = 3,
 ) -> keras.Model:
     """
-    Build conditional ResNet generator with dynamic image size support.
+    Build conditional ResNet generator optimized for 24GB VRAM (High Capacity).
 
     Architecture:
-    - ResNet design for robust gradient flow (best practice for GANs)
-    - Residual blocks replace simple layers for better feature learning
-    - Batch normalization for training stability
-    - Self-attention at bottleneck for global coherence
+    - ResNet design for robust gradient flow
+    - Doubled filter capacity for high-quality 256x256 generation
+    - Self-attention at 32x32 for global coherence
     - Dynamic upsampling based on target image_size
 
     Args:
@@ -133,46 +201,40 @@ def build_generator(
     # Combine noise and class embedding
     combined = layers.Concatenate()([noise_input, class_embedding])
 
-    # ========== INITIAL PROJECTION ==========
-    # Project to 8x8x256 feature map
-    x = layers.Dense(8 * 8 * 256, use_bias=False)(combined)
+    # ========== INITIAL PROJECTION (High Capacity) ==========
+    # Project to 8x8x512 feature map (Doubled from 256)
+    x = layers.Dense(8 * 8 * 512, use_bias=False)(combined)
     x = layers.BatchNormalization()(x)
     x = layers.LeakyReLU(0.2)(x)
-    x = layers.Reshape((8, 8, 256))(x)
-
-    # ========== SELF-ATTENTION at 8x8 ==========
-    # Removed: Self-attention at 8x8 is too early to capture meaningful global structure
-    # x = SelfAttention(256)(x)
+    x = layers.Reshape((8, 8, 512))(x)
 
     # ========== UPSAMPLING PATH WITH RESIDUAL BLOCKS ==========
     
-    # 8x8 -> 16x16
+    # 8x8 -> 16x16 (Filters: 512)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = residual_block(x, 512)
+    
+    # 16x16 -> 32x32 (Filters: 256 - was 192)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 256)
-    
-    # 16x16 -> 32x32
-    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-    x = residual_block(x, 192)
 
     # ========== SELF-ATTENTION at 32x32 ==========
-    # Moved here: 32x32 is a sweet spot for attention (good balance of global context vs compute)
-    x = SelfAttention(192)(x)
+    # 32x32 is optimal for attention balance
+    x = SelfAttention(256)(x)
     
-    # 32x32 -> 64x64
+    # 32x32 -> 64x64 (Filters: 256 - was 128)
+    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
+    x = residual_block(x, 256)
+
+    # 64x64 -> 128x128 (Filters: 128 - was 64)
     x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
     x = residual_block(x, 128)
 
-
-    
-    # 64x64 -> 128x128
-    x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-    x = residual_block(x, 64)
-
     # ========== CONDITIONAL UPSAMPLING FOR 256x256 ==========
     if image_size == 256:
-        # 128x128 -> 256x256
+        # 128x128 -> 256x256 (Filters: 64 - was 32)
         x = layers.UpSampling2D(size=2, interpolation='bilinear')(x)
-        x = residual_block(x, 32)
+        x = residual_block(x, 64)
 
     # ========== OUTPUT ==========
     output = layers.Conv2D(channels, 7, padding='same', activation='tanh', name='output')(x)
@@ -196,10 +258,13 @@ def build_discriminator(
     num_classes: int = 2,
 ) -> keras.Model:
     """
-    Build conditional PatchGAN discriminator with dynamic image size support.
+    Build conditional PatchGAN discriminator with anti-mode-collapse features.
 
     Architecture:
-    - Memory-efficient with smaller filter counts
+    - GaussianNoise input to prevent memorization
+    - Increased filter capacity (128→256→512→512)
+    - Dropout for regularization
+    - MinibatchDiscrimination to detect mode collapse
     - Class conditioning via embedding concatenation
     - PatchGAN output for local texture discrimination
 
@@ -208,13 +273,15 @@ def build_discriminator(
         channels: Number of input channels (default: 3)
         num_classes: Number of classes (default: 2)
 
-
     Returns:
         Keras Model: Discriminator that takes [image, class_label] and outputs validity map
     """
     # ========== INPUTS ==========
     image_input = layers.Input(shape=(image_size, image_size, channels), name='image')
     class_input = layers.Input(shape=(1,), dtype='int32', name='class_label')
+
+    # ========== INPUT NOISE (prevents memorization) ==========
+    x = GaussianNoise(stddev=0.1)(image_input)
 
     # Embed class label
     # Map class index to a learnable scalar value (1 dimension)
@@ -226,37 +293,51 @@ def build_discriminator(
     class_embedding = layers.Lambda(lambda x: tf.tile(x, [1, image_size, image_size, 1]))(class_embedding) # [B, H, W, 1]
 
     # Concatenate image with class channel
-    x = layers.Concatenate()([image_input, class_embedding])
+    x = layers.Concatenate()([x, class_embedding])
 
-    # ========== CONVOLUTIONAL LAYERS ==========
-    def conv_block(x, filters, kernel_size=4, strides=2):
-        """Convolutional block."""
-        conv = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')
-        x = conv(x)
+    # ========== CONVOLUTIONAL LAYERS (Increased Capacity) ==========
+    def conv_block(x, filters, kernel_size=4, strides=2, dropout_rate=0.3):
+        """Convolutional block with dropout for regularization."""
+        x = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')(x)
         # Layer Normalization is preferred for WGAN-GP over Batch Normalization
         x = layers.LayerNormalization()(x)
         x = layers.LeakyReLU(0.2)(x)
+        x = layers.Dropout(dropout_rate)(x)
         return x
 
-    # 128x128x4 -> 64x64x64
-    x = conv_block(x, 64)
+    # 256x256x4 -> 128x128x128 (or 128x128x4 -> 64x64x128)
+    x = conv_block(x, 128, dropout_rate=0.25)
 
-    # 64x64x64 -> 32x32x128
-    x = conv_block(x, 128)
+    # -> 64x64x256 (or 32x32x256)
+    x = conv_block(x, 256, dropout_rate=0.25)
     
-    # ========== SELF-ATTENTION at 32x32 ==========
+    # ========== SELF-ATTENTION at 64x64 or 32x32 ==========
     # Adds global coherence check to the discriminator
-    x = SelfAttention(128)(x)
+    x = SelfAttention(256)(x)
 
-    # 32x32x128 -> 16x16x256
-    x = conv_block(x, 256)
+    # -> 32x32x512 (or 16x16x512)
+    x = conv_block(x, 512, dropout_rate=0.3)
 
-    # 16x16x256 -> 8x8x384 (increased to better balance with generator capacity)
-    x = conv_block(x, 384)
+    # -> 16x16x512 (or 8x8x512)
+    x = conv_block(x, 512, dropout_rate=0.3)
 
-    # ========== PATCHGAN OUTPUT ==========
-    # Output: 8x8x1 patch predictions (no activation for WGAN)
-    validity = layers.Conv2D(1, 4, padding='same', name='validity')(x)  # [B, 8, 8, 1]
+    # ========== MINIBATCH DISCRIMINATION ==========
+    # Reduce spatial dimensions to keep parameter count manageable
+    # 16x16x512 (131k features) -> 512 features
+    # This prevents the MinibatchDiscrimination layer from having 65M+ parameters
+    pooled = layers.GlobalAveragePooling2D()(x)
+    
+    # Minibatch discrimination to detect mode collapse
+    mb_features = MinibatchDiscrimination(num_kernels=100, kernel_dim=5)(pooled)
+    
+    # Dense layer before output
+    dense = layers.Dense(256)(mb_features)
+    dense = layers.LeakyReLU(0.2)(dense)
+    dense = layers.Dropout(0.3)(dense)
+
+    # ========== OUTPUT ==========
+    # Single validity score (for WGAN, no activation)
+    validity = layers.Dense(1, name='validity')(dense)
 
     model = keras.Model(
         inputs=[image_input, class_input],

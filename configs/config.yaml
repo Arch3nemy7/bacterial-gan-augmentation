@@ -36,7 +36,7 @@ training:
   latent_dim: 100  # Dimension of noise vector for generator
 
   # Training hyperparameters
-  batch_size: 8  # Batch size for training (reduced for 256x256 images to fit in memory)
+  batch_size: 32  # Batch size for training (reduced for 256x256 images to fit in memory)
   epochs: 300  # Total number of training epochs
   
   # Two-Timescale Update Rule (TTUR) - separate learning rates for G and D
@@ -50,7 +50,7 @@ training:
 
   # GAN loss settings
   loss_type: "wgan-gp"  # Loss function: "wgan-gp", "lsgan", or "vanilla"
-  n_critic: 5  # Reduced from 5 to prevent critic drift (modern WGAN-GP practice)
+  n_critic: 3  # Reduced from 5 to prevent critic drift (modern WGAN-GP practice)
   lambda_gp: 10.0  # Gradient penalty coefficient (for WGAN-GP)
 
   # Performance settings
