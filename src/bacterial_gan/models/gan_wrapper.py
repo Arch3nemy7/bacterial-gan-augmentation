@@ -115,7 +115,7 @@ class ConditionalGAN:
             learning_rate=learning_rate_d,
             beta_1=beta1,
             beta_2=beta2,
-            clipnorm=1.0  # Clip gradients to prevent exploding gradients
+            clipnorm=3.0  # Moderate clipping - allows learning while preventing explosions
         )
 
         # Metrics tracking
