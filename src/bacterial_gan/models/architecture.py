@@ -285,35 +285,35 @@ def build_discriminator(
     x = GaussianNoise(stddev=0.05)(image_input)
     
     # Initial Conv (No residual usually for the very first layer mapping from RGB)
-    x = layers.Conv2D(64, 4, strides=2, padding='same')(x) # 256 -> 128
+    x = layers.Conv2D(96, 4, strides=2, padding='same')(x) # 256 -> 128
     x = layers.LeakyReLU(0.2)(x)
     x = layers.Dropout(0.2)(x)
 
     # ========== RESIDUAL DOWN-SAMPLING BLOCKS ==========
     
-    # 128x128 -> 64x64 (Filters: 64) - Reduced from 128
-    x = residual_block_down(x, 64)
+    # 128x128 -> 64x64 (Filters: 96) - Increased from 64 for better capacity
+    x = residual_block_down(x, 96)
 
-    # 64x64 -> 32x32 (Filters: 128) - Reduced from 256
-    x = residual_block_down(x, 128)
+    # 64x64 -> 32x32 (Filters: 160) - Increased from 128 for better capacity
+    x = residual_block_down(x, 160)
 
     # ========== SELF-ATTENTION at 32x32 (optimal resolution) ==========
-    x = SelfAttention(128)(x)
+    x = SelfAttention(160)(x)
 
-    # 32x32 -> 16x16 (Filters: 256) - Reduced from 512
-    x = residual_block_down(x, 256)
+    # 32x32 -> 16x16 (Filters: 320) - Increased from 256 for better capacity
+    x = residual_block_down(x, 320)
 
     # ========== MINIBATCH DISCRIMINATION ==========
     # Global pooling to reduce spatial dimensions
     pooled = layers.GlobalAveragePooling2D()(x)
 
     # Dense layers for final classification (feature extraction)
-    dense = layers.Dense(256)(pooled) # Reduced from 512
+    dense = layers.Dense(320)(pooled) # Increased from 256 for better capacity
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.4)(dense)
 
-    # Final feature vector (128 dimensions)
-    feature_vector = layers.Dense(128)(dense)
+    # Final feature vector (160 dimensions) - Increased from 128 for better capacity
+    feature_vector = layers.Dense(160)(dense)
     feature_vector = layers.LeakyReLU(0.2)(feature_vector)
     feature_vector = layers.Dropout(0.3)(feature_vector)
 
@@ -323,7 +323,7 @@ def build_discriminator(
 
     # 2. Class projection (y^T * V * x) -> implemented as dot product of embeddings
     # Embed class label to same dimension as feature vector
-    class_embedding = layers.Embedding(num_classes, 128, name='projection_embedding')(class_input)
+    class_embedding = layers.Embedding(num_classes, 160, name='projection_embedding')(class_input)
     class_embedding = layers.Flatten()(class_embedding)
 
     # Inner product (Projection)
