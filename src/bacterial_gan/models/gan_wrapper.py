@@ -114,7 +114,8 @@ class ConditionalGAN:
         self.disc_optimizer = keras.optimizers.Adam(
             learning_rate=learning_rate_d,
             beta_1=beta1,
-            beta_2=beta2
+            beta_2=beta2,
+            clipnorm=1.0  # Clip gradients to prevent exploding gradients
         )
 
         # Metrics tracking

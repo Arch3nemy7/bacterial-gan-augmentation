@@ -42,7 +42,7 @@ training:
   # Two-Timescale Update Rule (TTUR) - separate learning rates for G and D
   # Balanced learning rates for stable GAN training
   learning_rate_g: 0.0002  # Generator learning rate (Stable)
-  learning_rate_d: 0.0004  # Discriminator learning rate (Increased from 0.0001 to prevent D collapse)
+  learning_rate_d: 0.0002  # Discriminator learning rate (Matched to G to prevent exploding gradients)
   learning_rate: 0.0001  # Fallback for backward compatibility (deprecated)
 
   beta1: 0.0  # Adam optimizer beta1 parameter (0.0 for WGAN-GP)
