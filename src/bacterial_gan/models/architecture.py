@@ -64,57 +64,6 @@ class SelfAttention(layers.Layer):
         return self.gamma * out + inputs
 
 
-class MinibatchDiscrimination(layers.Layer):
-    """
-    Minibatch Discrimination layer to detect mode collapse.
-    
-    Compares each sample to all other samples in the batch to detect
-    if the generator is producing similar images (mode collapse).
-    
-    Reference: Salimans et al. "Improved Techniques for Training GANs"
-    """
-    
-    def __init__(self, num_kernels=50, kernel_dim=5, **kwargs):
-        super().__init__(**kwargs)
-        self.num_kernels = num_kernels
-        self.kernel_dim = kernel_dim
-    
-    def build(self, input_shape):
-        self.input_dim = int(input_shape[-1])
-        # Tensor T with shape [input_dim, num_kernels * kernel_dim]
-        self.T = self.add_weight(
-            name='T',
-            shape=(self.input_dim, self.num_kernels * self.kernel_dim),
-            initializer='glorot_uniform',
-            trainable=True
-        )
-        super().build(input_shape)
-    
-    def call(self, x):
-        # x shape: [batch, features]
-        # M shape: [batch, num_kernels, kernel_dim]
-        M = tf.reshape(
-            tf.matmul(x, self.T),
-            [-1, self.num_kernels, self.kernel_dim]
-        )
-        
-        # Compute L1 distance between all pairs in batch
-        # M_i - M_j for all pairs
-        M_expanded = tf.expand_dims(M, 0)  # [1, batch, num_kernels, kernel_dim]
-        M_transposed = tf.expand_dims(M, 1)  # [batch, 1, num_kernels, kernel_dim]
-        
-        # L1 distance
-        diffs = tf.reduce_sum(tf.abs(M_expanded - M_transposed), axis=3)  # [batch, batch, num_kernels]
-        
-        # Apply negative exponential
-        c = tf.exp(-diffs)  # [batch, batch, num_kernels]
-        
-        # Sum over batch dimension (excluding self)
-        # o(x_i) = sum_{j != i} c(x_i, x_j)
-        o = tf.reduce_sum(c, axis=1) - 1  # Subtract 1 to exclude self-comparison
-        
-        # Concatenate with original features
-        return tf.concat([x, o], axis=-1)
 
 
 class GaussianNoise(layers.Layer):
@@ -311,15 +260,12 @@ def build_discriminator(
     Build conditional PatchGAN discriminator optimized for RTX 4070 Ti (12GB VRAM).
 
     Architecture Optimizations for RTX 4070 Ti:
-    - Residual Architecture: Matching Generator's ResNet capacity
-    - Balanced capacity: 64->128->256->512 filter progression
-    - Single self-attention: at 32x32 resolution (most impactful)
+    - Reduced capacity to prevent discriminator dominance
+    - Balanced capacity: 64->64->128->256 filter progression
+    - Single self-attention: at 32x32 resolution
     - Strong regularization: Dropout + GaussianNoise + MinibatchDiscrimination
-    - Optimized for 256x256 images with batch size 10-14
-    - Designed for mixed precision (FP16) training
-    - Memory efficient while preventing mode collapse
-    - PROJECTION DISCRIMINATOR: Uses inner product for conditioning
-
+    - Optimized for 256x256 images
+    
     Args:
         image_size: Input image size - must be 256 (default: 256)
         channels: Number of input channels (default: 3)
@@ -345,27 +291,24 @@ def build_discriminator(
 
     # ========== RESIDUAL DOWN-SAMPLING BLOCKS ==========
     
-    # 128x128 -> 64x64 (Filters: 128)
+    # 128x128 -> 64x64 (Filters: 64) - Reduced from 128
+    x = residual_block_down(x, 64)
+
+    # 64x64 -> 32x32 (Filters: 128) - Reduced from 256
     x = residual_block_down(x, 128)
 
-    # 64x64 -> 32x32 (Filters: 256)
-    x = residual_block_down(x, 256)
-
     # ========== SELF-ATTENTION at 32x32 (optimal resolution) ==========
-    x = SelfAttention(256)(x)
+    x = SelfAttention(128)(x)
 
-    # 32x32 -> 16x16 (Filters: 512) - Increased capacity to match Generator
-    x = residual_block_down(x, 512)
+    # 32x32 -> 16x16 (Filters: 256) - Reduced from 512
+    x = residual_block_down(x, 256)
 
     # ========== MINIBATCH DISCRIMINATION ==========
     # Global pooling to reduce spatial dimensions
     pooled = layers.GlobalAveragePooling2D()(x)
 
-    # Minibatch discrimination (optimized for 12GB VRAM)
-    mb_features = MinibatchDiscrimination(num_kernels=100, kernel_dim=5)(pooled)
-
     # Dense layers for final classification (feature extraction)
-    dense = layers.Dense(512)(mb_features)
+    dense = layers.Dense(256)(pooled) # Reduced from 512
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.4)(dense)
 
