@@ -269,6 +269,39 @@ def build_generator(
 # DISCRIMINATOR (PatchGAN for 128x128 or 256x256 images)
 # ============================================================================
 
+def residual_block_down(x, filters, kernel_size=3, downsample=True):
+    """
+    Residual block with downsampling for Discriminator (ResNet style).
+    
+    Structure:
+    Input -> [Conv-LN-LeakyReLU] -> [Conv-LN-LeakyReLU] -> Add(Input_Shortcut)
+    
+    Note: Uses LayerNormalization (LN) instead of BatchNorm for WGAN-GP.
+    """
+    shortcut = x
+    stride = 2 if downsample else 1
+    
+    # First convolution
+    x = layers.Conv2D(filters, kernel_size, strides=stride, padding='same')(x)
+    x = layers.LayerNormalization()(x)
+    x = layers.LeakyReLU(0.2)(x)
+    x = layers.Dropout(0.3)(x)  # Dropout for discriminator regularization
+    
+    # Second convolution
+    x = layers.Conv2D(filters, kernel_size, strides=1, padding='same')(x)
+    x = layers.LayerNormalization()(x)
+    
+    # Adjust shortcut if dimensions change
+    if downsample or x.shape[-1] != shortcut.shape[-1]:
+        shortcut = layers.Conv2D(filters, 1, strides=stride, padding='same')(shortcut)
+        # No normalization on shortcut path usually, but can add if needed for stability
+    
+    # Add skip connection
+    x = layers.Add()([x, shortcut])
+    x = layers.LeakyReLU(0.2)(x)
+    return x
+
+
 def build_discriminator(
     image_size: int = 256,
     channels: int = 3,
@@ -278,13 +311,14 @@ def build_discriminator(
     Build conditional PatchGAN discriminator optimized for RTX 4070 Ti (12GB VRAM).
 
     Architecture Optimizations for RTX 4070 Ti:
-    - Balanced capacity: 64→128→256→384 filter progression (optimized for 12GB)
+    - Residual Architecture: Matching Generator's ResNet capacity
+    - Balanced capacity: 64->128->256->512 filter progression
     - Single self-attention: at 32x32 resolution (most impactful)
-    - Efficient depth: 4 conv layers for balance of quality and memory
     - Strong regularization: Dropout + GaussianNoise + MinibatchDiscrimination
     - Optimized for 256x256 images with batch size 10-14
     - Designed for mixed precision (FP16) training
     - Memory efficient while preventing mode collapse
+    - PROJECTION DISCRIMINATOR: Uses inner product for conditioning
 
     Args:
         image_size: Input image size - must be 256 (default: 256)
@@ -302,70 +336,62 @@ def build_discriminator(
     class_input = layers.Input(shape=(1,), dtype='int32', name='class_label')
 
     # ========== INPUT NOISE (prevents memorization) ==========
-    x = GaussianNoise(stddev=0.05)(image_input)  # Reduced noise for high-capacity model
+    x = GaussianNoise(stddev=0.05)(image_input)
+    
+    # Initial Conv (No residual usually for the very first layer mapping from RGB)
+    x = layers.Conv2D(64, 4, strides=2, padding='same')(x) # 256 -> 128
+    x = layers.LeakyReLU(0.2)(x)
+    x = layers.Dropout(0.2)(x)
 
-    # Embed class label
-    class_embedding = layers.Embedding(num_classes, 1, name='class_emb')(class_input)
-    class_embedding = layers.Flatten()(class_embedding)
-    class_embedding = layers.Reshape((1, 1, 1))(class_embedding)
+    # ========== RESIDUAL DOWN-SAMPLING BLOCKS ==========
+    
+    # 128x128 -> 64x64 (Filters: 128)
+    x = residual_block_down(x, 128)
 
-    # Tile to match image spatial dimensions
-    class_embedding = layers.Lambda(lambda x: tf.tile(x, [1, image_size, image_size, 1]))(class_embedding)
-
-    # Concatenate image with class channel
-    x = layers.Concatenate()([x, class_embedding])
-
-    # ========== CONVOLUTIONAL LAYERS (MEMORY-OPTIMIZED) ==========
-    def conv_block(x, filters, kernel_size=4, strides=2, dropout_rate=0.3):
-        """Convolutional block with LayerNorm and dropout."""
-        # Standard WGAN-GP
-        x = layers.Conv2D(filters, kernel_size, strides=strides, padding='same')(x)
-        x = layers.LayerNormalization()(x)
-        x = layers.LeakyReLU(0.2)(x)
-        x = layers.Dropout(dropout_rate)(x)
-        return x
-
-
-    # 256x256x4 -> 128x128x64 (balanced capacity for 12GB VRAM)
-    x = conv_block(x, 64, dropout_rate=0.2)
-
-    # 128x128x64 -> 64x64x128
-    x = conv_block(x, 128, dropout_rate=0.25)
-
-    # 64x64x128 -> 32x32x256
-    x = conv_block(x, 256, dropout_rate=0.3)
+    # 64x64 -> 32x32 (Filters: 256)
+    x = residual_block_down(x, 256)
 
     # ========== SELF-ATTENTION at 32x32 (optimal resolution) ==========
     x = SelfAttention(256)(x)
 
-    # 32x32x256 -> 16x16x384 (final conv layer)
-    x = conv_block(x, 384, dropout_rate=0.35)
+    # 32x32 -> 16x16 (Filters: 512) - Increased capacity to match Generator
+    x = residual_block_down(x, 512)
 
     # ========== MINIBATCH DISCRIMINATION ==========
     # Global pooling to reduce spatial dimensions
     pooled = layers.GlobalAveragePooling2D()(x)
 
     # Minibatch discrimination (optimized for 12GB VRAM)
-    mb_features = MinibatchDiscrimination(num_kernels=75, kernel_dim=6)(pooled)
+    mb_features = MinibatchDiscrimination(num_kernels=100, kernel_dim=5)(pooled)
 
-    # Dense layers for final classification (reduced capacity)
-    # Standard WGAN-GP: Normal Dense layers
-    dense = layers.Dense(256)(mb_features)
+    # Dense layers for final classification (feature extraction)
+    dense = layers.Dense(512)(mb_features)
     dense = layers.LeakyReLU(0.2)(dense)
     dense = layers.Dropout(0.4)(dense)
 
-    dense = layers.Dense(128)(dense)
-    dense = layers.LeakyReLU(0.2)(dense)
-    dense = layers.Dropout(0.3)(dense)
+    # Final feature vector (128 dimensions)
+    feature_vector = layers.Dense(128)(dense)
+    feature_vector = layers.LeakyReLU(0.2)(feature_vector)
+    feature_vector = layers.Dropout(0.3)(feature_vector)
 
-    # ========== OUTPUT ==========
-    # Single validity score (for WGAN, no activation)
-    validity = layers.Dense(1, name='validity')(dense)
+    # ========== PROJECTION DISCRIMINATOR OUTPUT ==========
+    # 1. Linear validity score from features (f(x))
+    validity_score = layers.Dense(1, name='validity_score')(feature_vector)
 
+    # 2. Class projection (y^T * V * x) -> implemented as dot product of embeddings
+    # Embed class label to same dimension as feature vector
+    class_embedding = layers.Embedding(num_classes, 128, name='projection_embedding')(class_input)
+    class_embedding = layers.Flatten()(class_embedding)
+
+    # Inner product (Projection)
+    projection = layers.Dot(axes=1)([feature_vector, class_embedding])
+
+    # Final output = f(x) + projection
+    final_output = layers.Add(name='validity')([validity_score, projection])
 
     model = keras.Model(
         inputs=[image_input, class_input],
-        outputs=validity,
+        outputs=final_output,
         name='discriminator'
     )
 

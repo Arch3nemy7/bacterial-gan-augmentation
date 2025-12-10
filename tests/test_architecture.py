@@ -33,9 +33,9 @@ def main():
     print("-" * 80)
 
     generator = build_generator(
-        latent_dim=100,
+        latent_dim=256,
         num_classes=2,
-        image_size=128,
+        image_size=256,
         channels=3
     )
 
@@ -47,7 +47,7 @@ def main():
     print("Testing Generator Forward Pass...")
     print("-" * 80)
 
-    noise = tf.random.normal([4, 100])
+    noise = tf.random.normal([4, 256])
     labels = tf.constant([0, 1, 0, 1], dtype=tf.int32)
 
     fake_images = generator([noise, labels], training=False)
@@ -63,10 +63,9 @@ def main():
     print("-" * 80)
 
     discriminator = build_discriminator(
-        image_size=128,
+        image_size=256,
         channels=3,
         num_classes=2,
-        use_spectral_norm=True
     )
 
     print(f"\nDiscriminator Architecture:")
@@ -116,9 +115,9 @@ def main():
     print("-" * 80)
 
     cgan = build_cgan(
-        latent_dim=100,
+        latent_dim=256,
         num_classes=2,
-        image_size=128,
+        image_size=256,
         channels=3,
         loss_type="wgan-gp"
     )

@@ -43,7 +43,7 @@ def main():
     plt.subplot(2, 1, 1)
     plt.plot(g_steps, g_values, label='Generator Loss', color='blue', alpha=0.7)
     plt.plot(d_steps, d_values, label='Discriminator Loss', color='red', alpha=0.7)
-    plt.title('Training Losses (Epoch 1-133)')
+    plt.title('Training Losses (Epoch 1-55)')
     plt.xlabel('Step')
     plt.ylabel('Loss Value')
     plt.legend()
@@ -59,7 +59,7 @@ def main():
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    output_file = os.path.join(output_dir, "loss_graph_epoch_130.png")
+    output_file = os.path.join(output_dir, "loss_graph_epoch_55.png")
     plt.savefig(output_file)
     print(f"Graph saved to {output_file}")
 
