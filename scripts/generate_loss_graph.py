@@ -18,8 +18,8 @@ def read_metric_file(filepath):
 
 def main():
     base_dir = "/home/arch3nemy7/Documents/bacterial-gan-augmentation"
-    run_id = "2aed2275ae53492da22e1b4ac6d5e471"
-    experiment_id = "427725965810359407"
+    run_id = "7bb341c8b317480f8eeb09d7b880f44f"
+    experiment_id = "808284914952110938"
     
     metrics_path = os.path.join(base_dir, "mlruns", experiment_id, run_id, "metrics")
     output_dir = os.path.join(base_dir, "outputs")
