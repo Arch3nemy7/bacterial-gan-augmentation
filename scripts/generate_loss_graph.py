@@ -40,21 +40,12 @@ def main():
     plt.figure(figsize=(12, 10))
     
     # Plot 1: Generator and Discriminator Loss
-    plt.subplot(2, 1, 1)
+    plt.subplot(1, 1, 1)
     plt.plot(g_steps, g_values, label='Generator Loss', color='blue', alpha=0.7)
     plt.plot(d_steps, d_values, label='Discriminator Loss', color='red', alpha=0.7)
     plt.title('Training Losses (Epoch 1-55)')
     plt.xlabel('Step')
     plt.ylabel('Loss Value')
-    plt.legend()
-    plt.grid(True, alpha=0.3)
-    
-    # Plot 2: Gradient Penalty
-    plt.subplot(2, 1, 2)
-    plt.plot(gp_steps, gp_values, label='Gradient Penalty', color='green', alpha=0.7)
-    plt.title('Gradient Penalty (WGAN-GP)')
-    plt.xlabel('Step')
-    plt.ylabel('Penalty Value')
     plt.legend()
     plt.grid(True, alpha=0.3)
     

@@ -26,7 +26,9 @@ def save_sample_images(
     gan: ConditionalGAN,
     epoch: int,
     save_dir: Path,
-    num_samples: int = 16
+    num_samples: int = 16,
+    noise: Optional[tf.Tensor] = None,
+    class_labels: Optional[tf.Tensor] = None
 ):
     """
     Generate and save sample images during training.
@@ -36,18 +38,21 @@ def save_sample_images(
         epoch: Current epoch number
         save_dir: Directory to save images
         num_samples: Number of samples to generate
+        noise: Optional fixed noise vector
+        class_labels: Optional fixed class labels
     """
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    # Generate samples (8 from each class)
-    samples_per_class = num_samples // gan.num_classes
-    class_labels = []
-    for i in range(gan.num_classes):
-        class_labels.extend([i] * samples_per_class)
-    class_labels = tf.constant(class_labels, dtype=tf.int32)
+    # Generate samples (8 from each class) if labels not provided
+    if class_labels is None:
+        samples_per_class = num_samples // gan.num_classes
+        class_labels = []
+        for i in range(gan.num_classes):
+            class_labels.extend([i] * samples_per_class)
+        class_labels = tf.constant(class_labels, dtype=tf.int32)
 
     # Generate images
-    generated_images = gan.generate_samples(class_labels, num_samples)
+    generated_images = gan.generate_samples(class_labels, num_samples, noise=noise)
 
     # Denormalize from [-1, 1] to [0, 1]
     generated_images = (generated_images + 1.0) / 2.0
@@ -172,6 +177,26 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         )
         print()
 
+        # Create fixed noise for consistent sampling evaluation
+        print("🔒 Creating fixed noise vectors for consistent sampling evaluation...")
+        fixed_num_samples = settings.training.num_samples_during_training
+        
+        # Ensure we have consistent labels (balanced)
+        fixed_samples_per_class = fixed_num_samples // 2
+        fixed_labels = []
+        for i in range(2):
+            fixed_labels.extend([i] * fixed_samples_per_class)
+        # Handle odd numbers if any
+        if len(fixed_labels) < fixed_num_samples:
+             fixed_labels.extend([0] * (fixed_num_samples - len(fixed_labels)))
+             
+        fixed_labels = tf.constant(fixed_labels, dtype=tf.int32)
+        
+        # Generate the fixed noise vector
+        fixed_noise = tf.random.normal([fixed_num_samples, settings.training.latent_dim])
+        print(f"   Created fixed noise shape: {fixed_noise.shape} for {fixed_num_samples} samples")
+        print()
+
         # Resume from checkpoint if specified
         start_epoch = 0
         if resume_from_checkpoint:
@@ -292,7 +317,14 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             # Save sample images every N epochs (4 samples for GPU memory constraints)
             if (epoch + 1) % settings.training.sample_interval == 0 or epoch == 0:
                 print(f"🎨 Generating sample images...")
-                sample_path = save_sample_images(gan, epoch + 1, samples_dir, num_samples=settings.training.num_samples_during_training)
+                sample_path = save_sample_images(
+                    gan, 
+                    epoch + 1, 
+                    samples_dir, 
+                    num_samples=settings.training.num_samples_during_training,
+                    noise=fixed_noise,
+                    class_labels=fixed_labels
+                )
                 mlflow.log_artifact(sample_path, "samples")
                 print(f"✅ Samples saved to {sample_path}")
                 print()

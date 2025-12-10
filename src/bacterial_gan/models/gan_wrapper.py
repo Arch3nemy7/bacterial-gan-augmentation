@@ -272,7 +272,8 @@ class ConditionalGAN:
     def generate_samples(
         self,
         class_labels: Optional[tf.Tensor] = None,
-        num_samples: int = 16
+        num_samples: int = 16,
+        noise: Optional[tf.Tensor] = None
     ) -> np.ndarray:
         """
         Generate synthetic samples.
@@ -280,6 +281,7 @@ class ConditionalGAN:
         Args:
             class_labels: Class labels [num_samples]. If None, generates balanced samples
             num_samples: Number of samples to generate
+            noise: Optional noise vector [num_samples, latent_dim]. If provided, ensures deterministic output.
 
         Returns:
             Generated images [num_samples, H, W, C] in range [-1, 1]
@@ -295,7 +297,9 @@ class ConditionalGAN:
             class_labels.extend([0] * remaining)
             class_labels = tf.constant(class_labels, dtype=tf.int32)
 
-        noise = tf.random.normal([num_samples, self.latent_dim])
+        if noise is None:
+            noise = tf.random.normal([num_samples, self.latent_dim])
+
         generated_images = self.generator([noise, class_labels], training=False)
 
         return generated_images.numpy()
