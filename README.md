@@ -1,37 +1,42 @@
 # Bacterial GAN Augmentation
 
-Proyek untuk augmentasi data citra bakteri menggunakan Conditional Generative Adversarial Networks (cGAN) untuk meningkatkan kualitas klasifikasi bakteri Gram-positif dan Gram-negatif.
+A deep learning project for bacterial image augmentation using **StyleGAN2-ADA** to generate synthetic Gram-positive and Gram-negative bacterial images for improved classification.
 
-## 📋 Deskripsi Proyek
+## 🎯 Overview
 
-README ini harus berisi:
+This project uses StyleGAN2-ADA (Adaptive Discriminator Augmentation) to generate realistic synthetic bacterial images, specifically designed for:
+- Limited data scenarios common in medical imaging
+- Class-conditional generation (Gram-positive vs Gram-negative)
+- Resource-constrained training (optimized for <16GB VRAM)
 
-### 🎯 Tujuan Proyek
-- Problem statement yang jelas tentang keterbatasan dataset bakteri
-- Solusi yang ditawarkan menggunakan cGAN
-- Target metrics dan expected outcomes
+## 🏗️ Architecture
 
-### 🏗️ Arsitektur Sistem
-- Overview arsitektur cGAN yang digunakan
-- Pipeline data processing dan training
-- Deployment architecture untuk API
-- Integration dengan MLflow untuk experiment tracking
+### StyleGAN2-ADA
+- **Mapping Network**: Transforms z → w latent space for better disentanglement
+- **Synthesis Network**: Style-modulated image generation at 256×256 resolution
+- **Discriminator**: With Adaptive Discriminator Augmentation (ADA)
+- **Class Conditioning**: Via projection discriminator and class embeddings
 
-### 📊 Dataset
-- Deskripsi dataset bakteri yang digunakan
-- Preprocessing steps dan normalisasi warna Macenko
-- Data splits dan augmentation strategies
-- Class distribution dan balancing approaches
+### Key Features
+- **ADA**: Dynamically adjusts augmentation to prevent discriminator overfitting
+- **R1 Regularization**: Gradient penalty for stable training
+- **Lazy Regularization**: Efficient computation (R1 every 16 steps)
+- **Simplified Mode**: For GPUs with <16GB VRAM
 
-### 🚀 Quick Start
+## 🚀 Quick Start
+
 ```bash
 # Installation
 git clone <repository-url>
 cd bacterial-gan-augmentation
-make install
+poetry install
+
+# Prepare data
+# Place images in: data/01_raw/gram_positive/ and data/01_raw/gram_negative/
+poetry run python scripts/prepare_data.py
 
 # Training
-make train
+bacterial-gan train
 
 # Generate synthetic data
 bacterial-gan generate-data --run-id <mlflow-run-id> --num-images 1000
@@ -40,52 +45,84 @@ bacterial-gan generate-data --run-id <mlflow-run-id> --num-images 1000
 make run-api
 ```
 
-### 📁 Struktur Proyek
+## 📁 Project Structure
+
 ```
 bacterial-gan-augmentation/
-├── src/                    # Source code
-│   ├── models/            # Model architectures
-│   ├── data/              # Data handling
-│   ├── pipelines/         # Training & evaluation pipelines
-│   └── utils.py           # Utility functions
-├── app/                   # FastAPI application
-├── tests/                 # Unit tests
-├── configs/               # Configuration files
-├── scripts/               # Execution scripts
-└── docs/                  # Documentation
+├── src/bacterial_gan/
+│   ├── models/
+│   │   ├── stylegan2_ada.py      # Generator & Discriminator
+│   │   ├── stylegan2_wrapper.py  # Training wrapper
+│   │   └── losses.py             # R1, path length, logistic loss
+│   ├── pipelines/
+│   │   ├── train_pipeline.py     # Training with MLflow
+│   │   ├── evaluate_pipeline.py  # FID, IS, accuracy
+│   │   └── generate_data_pipeline.py
+│   ├── data/
+│   │   ├── dataset.py            # Data loading
+│   │   └── data_processing.py    # Patch extraction
+│   └── config.py                 # Configuration
+├── app/                          # FastAPI application
+├── configs/config.yaml          # Training configuration
+├── scripts/                      # Utility scripts
+└── tests/                        # Unit tests
 ```
 
-### 🔧 Konfigurasi
-- Environment setup dan dependencies
-- Configuration files explanation
-- MLflow setup dan tracking
-- GPU requirements dan setup
+## ⚙️ Configuration
 
-### 📈 Model Performance
-- Evaluation metrics yang digunakan (FID, IS, Classification accuracy)
-- Benchmark results vs baseline methods
-- Expert evaluation results
-- Computational efficiency metrics
+Key settings in `configs/config.yaml`:
 
-### 🛠️ Development
-- Development workflow dan best practices
-- Testing strategy
-- CI/CD pipeline setup
-- Contributing guidelines
+```yaml
+training:
+  use_simplified: true       # For <16GB VRAM
+  image_size: 256
+  batch_size: 12
+  epochs: 300
+  learning_rate_g: 0.0002
+  learning_rate_d: 0.0002
+  
+  # Regularization
+  r1_gamma: 10.0
+  r1_interval: 16
+  
+  # ADA
+  use_ada: true
+  ada_target: 0.6
+```
 
-### 📚 API Documentation
-- Endpoints overview
-- Authentication (jika ada)
-- Request/response examples
-- Rate limiting dan usage guidelines
+## 📊 MLflow Tracking
 
-### 🔬 Research Background
-- Literature review tentang GAN untuk medical imaging
-- Macenko color normalization explanation
-- Class conditioning strategies
-- Loss function design rationale
+All training runs are tracked with:
+- **Parameters**: Architecture settings, hyperparameters
+- **Metrics**: generator_loss, discriminator_loss, r1_penalty, ada_probability
+- **Artifacts**: Sample images, checkpoints, final model
 
-### 📄 License dan Citation
-- License information
-- How to cite this work
-- Acknowledgments
+View experiments: `mlflow ui`
+
+## 📈 Evaluation Metrics
+
+- **FID Score**: Image quality measurement
+- **Inception Score**: Diversity and quality
+- **Classification Accuracy**: Downstream task performance
+
+## 🛠️ Development
+
+```bash
+# Format code
+make format
+
+# Lint
+make lint
+
+# Run tests
+make test
+```
+
+## 📚 References
+
+- [StyleGAN2-ADA Paper](https://arxiv.org/abs/2006.06676)
+- [StyleGAN2 Paper](https://arxiv.org/abs/1912.04958)
+
+## 📄 License
+
+MIT License

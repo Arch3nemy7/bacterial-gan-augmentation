@@ -9,87 +9,78 @@ data:
   expert_testing_set_path: "data/04_expert_testing"
 
 preprocessing:
-  # Patch extraction settings (NEW: extracts patches instead of resizing)
-  use_patch_extraction: true # If true, extracts all possible patches. If false, extracts a single random patch per image.
-  image_size: 256  # Patch size to extract from high-res images (256x256)
-  apply_augmentation: false  # Apply traditional augmentation (rotations + flips, 8x multiplier)
-  bg_threshold: 0.9  # Background filtering threshold (0.9 = discard patches with >90% white space)
-  max_patches_per_split: 5000 # Limit dataset size to prevent storage explosion
+  use_patch_extraction: false
+  crop_mode: "resize"  # 'resize', 'center', or 'random' (when patch extraction disabled)
+  image_size: 256
+  apply_augmentation: false
+  bg_threshold: 0.9
+  max_patches_per_split: 5000
 
-  # Data splitting
-  train_ratio: 0.7  # Training set ratio (70%)
-  val_ratio: 0.15  # Validation set ratio (15%)
-  test_ratio: 0.15  # Test set ratio (15%)
-  random_seed: 42  # Random seed for reproducible splits
-
-  # Macenko normalization parameters (NOT recommended for this project)
-  apply_macenko_normalization: false  # Enable Macenko to normalize background lighting variations
-  macenko_io: 240  # Background light intensity
-  macenko_alpha: 1.0  # Percentile for angle calculation
-  macenko_beta: 0.15  # Optical density threshold for background filtering
+  train_ratio: 0.7
+  val_ratio: 0.15
+  test_ratio: 0.15
+  random_seed: 42
 
 training:
-  # Model architecture
-  image_size: 256  # Input/output image size (must match preprocessing.image_size)
-  num_classes: 2  # Number of bacterial classes (gram-positive, gram-negative)
-  channels: 3  # RGB channels
-  latent_dim: 256  # Dimension of noise vector for generator (rich representations)
+  # Architecture
+  use_simplified: true
+  image_size: 256
+  num_classes: 2
+  channels: 3
+  latent_dim: 256
 
-  # Training hyperparameters (OPTIMIZED FOR RTX 4070 Ti - 12GB VRAM)
-  batch_size: 12  # Balanced for 12GB VRAM (can try 14 if stable, 10 if OOM occurs)
-  epochs: 300  # Total number of training epochs
+  # Training
+  batch_size: 12
+  epochs: 300
+  learning_rate_g: 0.0002
+  learning_rate_d: 0.0002
+  beta1: 0.0
+  beta2: 0.99
+  n_critic: 1
 
-  # Two-Timescale Update Rule (TTUR) - separate learning rates for G and D
-  # Balanced learning rates for stable GAN training
-  learning_rate_g: 0.0002  # Generator learning rate (Stable)
-  learning_rate_d: 0.00025  # Discriminator learning rate (25% boost for better learning with clipping)
-  learning_rate: 0.0001  # Fallback for backward compatibility (deprecated)
+  # Loss
+  loss_type: "stylegan2"
 
-  beta1: 0.0  # Adam optimizer beta1 parameter (0.0 for WGAN-GP)
-  beta2: 0.9  # Adam optimizer beta2 parameter (0.9 for WGAN-GP)
+  # R1 Regularization
+  r1_gamma: 10.0
+  r1_interval: 16
 
-  # GAN loss settings
-  loss_type: "wgan-gp"  # Loss function: "wgan-gp", "lsgan", or "vanilla"
-  n_critic: 3  # Discriminator updates per generator update (Reduced from 3 to allow G to catch up)
-  lambda_gp: 10.0  # Gradient penalty coefficient (for WGAN-GP)
+  # Path Length Regularization
+  pl_weight: 2.0
+  pl_interval: 4
 
-  # Performance settings (OPTIMIZED FOR RTX 4070 Ti)
-  use_mixed_precision: false  # Use mixed precision training (ENABLED - RTX 4070 Ti has excellent FP16 performance)
+  # Adaptive Discriminator Augmentation (ADA)
+  use_ada: true
+  ada_target: 0.6
 
-  # Memory optimization settings (OPTIMIZED FOR 12GB VRAM)
+  # Performance
+  use_mixed_precision: false
   memory_optimization:
-    # GPU memory configuration
-    gpu_memory_growth: false  # Enable dynamic GPU memory allocation
-    gpu_memory_limit_mb: null  # No hard limit, but monitor usage on 12GB VRAM
+    gpu_memory_growth: false
+    gpu_memory_limit_mb: null
+    cpu_threads: 12
+    enable_xla: false
+    dataset_prefetch_buffer: -1
+    dataset_cache_in_memory: true
+    dataset_cache_filename: null
 
-    # CPU parallelization
-    cpu_threads: 12  # Number of CPU threads for data loading (balanced for typical systems)
+  # Checkpointing
+  checkpoint_interval: 50
+  sample_interval: 10
+  num_samples_during_training: 4
+  num_samples_final: 8
+  num_samples_grid: 16
 
-    # XLA compilation (DISABLED to avoid OOM during compilation)
-    enable_xla: false  # Keep disabled - XLA increases initial memory usage significantly
+  # Output
+  models_output_dir: "models"
+  samples_output_dir: "samples"
 
-    # Dataset pipeline optimization
-    dataset_prefetch_buffer: -1  # Prefetch buffer size (-1 = AUTOTUNE)
-    dataset_cache_in_memory: true  # Cache dataset in RAM (ensure system has sufficient RAM)
-    dataset_cache_filename: null  # No disk caching needed with in-memory cache
+  # MLflow
+  mlflow_experiment_name: "Bacterial GAN Augmentation"
+  mlflow_tracking_uri: ""
 
-  # Output and checkpointing
-  checkpoint_interval: 50  # Save model checkpoint every N epochs
-  sample_interval: 10  # Generate sample images every N epochs
-  num_samples_during_training: 4  # Number of sample images to generate during training
-  num_samples_final: 8  # Number of sample images to generate at end of training
-  num_samples_grid: 16  # Total samples for visualization grid (must be perfect square)
-
-  # Output directories
-  models_output_dir: "models"  # Base directory for saving model checkpoints
-  samples_output_dir: "samples"  # Base directory for saving sample images
-
-  # MLflow settings
-  mlflow_experiment_name: "Bacterial GAN Augmentation"  # MLflow experiment name
-  mlflow_tracking_uri: ""  # MLflow tracking URI (empty = local ./mlruns)
-
-  # Dummy dataset settings (for testing when no real data available)
-  dummy_num_batches: 10  # Number of batches in dummy dataset
+  # Testing
+  dummy_num_batches: 10
 
 evaluation:
   num_images_for_expert_panel: 25

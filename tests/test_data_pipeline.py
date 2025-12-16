@@ -3,10 +3,7 @@
 from pathlib import Path
 
 from bacterial_gan.config import get_settings
-from bacterial_gan.data.data_processing import (
-    create_data_splits,
-    validate_dataset_integrity,
-)
+from bacterial_gan.data.data_processing import create_data_splits, validate_dataset_integrity
 from bacterial_gan.data.dataset import create_datasets
 
 
@@ -28,7 +25,7 @@ def main():
     print(f"  Size distribution: {stats['size_distribution']}")
     print(f"  Corrupt images: {len(stats['corrupt_images'])}")
 
-    if stats['total_images'] == 0:
+    if stats["total_images"] == 0:
         print("\n" + "=" * 80)
         print("⚠️  NO IMAGES FOUND!")
         print("=" * 80)
@@ -52,9 +49,10 @@ def main():
         test_ratio=settings.preprocessing.test_ratio,
         random_seed=settings.preprocessing.random_seed,
         patch_size=settings.preprocessing.image_size,
-        apply_normalization=settings.preprocessing.apply_macenko_normalization,
         apply_augmentation=settings.preprocessing.apply_augmentation,
         bg_threshold=settings.preprocessing.bg_threshold,
+        use_patch_extraction=settings.preprocessing.use_patch_extraction,
+        crop_mode=settings.preprocessing.crop_mode,
     )
 
     print("\n" + "-" * 80)
@@ -87,6 +85,7 @@ def main():
     except Exception as e:
         print(f"\n❌ Error loading datasets: {e}")
         import traceback
+
         traceback.print_exc()
 
 

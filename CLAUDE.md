@@ -4,172 +4,115 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a research project for bacterial image augmentation using Conditional Generative Adversarial Networks (cGAN). The goal is to generate synthetic bacterial images (Gram-positive and Gram-negative) to augment limited training datasets and improve bacterial classification models.
+This is a research project for bacterial image augmentation using StyleGAN2-ADA. The goal is to generate synthetic bacterial images (Gram-positive and Gram-negative) to augment limited training datasets and improve bacterial classification models.
 
 **Tech Stack:**
 - Python 3.11 with Poetry for dependency management
 - TensorFlow/Keras for model implementation
-- DVC (Data Version Control) for pipeline management
-- MLflow for experiment tracking and model registry
+- DVC for pipeline management
+- MLflow for experiment tracking
 - FastAPI for inference API
-- Typer for CLI interface
+- Typer for CLI
 
-## Common Development Commands
+## Common Commands
 
-**Setup and Installation:**
 ```bash
-make install                    # Install dependencies using Poetry
-poetry install                  # Alternative to make install
-```
+# Setup
+make install
 
-**Code Quality:**
-```bash
-make format                     # Format code with black and isort
-make lint                       # Run flake8 linter
-poetry run black .              # Format specific files
-poetry run isort .              # Sort imports
-poetry run flake8 src/ app/ tests/  # Lint specific directories
-```
+# Training
+bacterial-gan train
+bacterial-gan train --config-path configs/config.yaml
 
-**Testing:**
-```bash
-make test                       # Run all tests with pytest
-poetry run pytest               # Alternative
-poetry run pytest tests/test_data_processing.py  # Run specific test file
-poetry run pytest -k test_name  # Run specific test by name
-```
-
-**Training and Pipeline:**
-```bash
-make train                      # Run training pipeline via DVC
-poetry run dvc repro train      # Alternative
-bacterial-gan train             # Direct CLI call
-bacterial-gan train --config-path configs/config.yaml  # With custom config
-```
-
-**Data Generation:**
-```bash
-make generate-data              # Run generation pipeline via DVC
+# Generation
 bacterial-gan generate-data --run-id <mlflow-run-id> --num-images 1000
-```
 
-**Model Evaluation:**
-```bash
+# Evaluation
 bacterial-gan evaluate --run-id <mlflow-run-id>
+
+# Code quality
+make format
+make lint
+make test
+
+# API
+make run-api
 ```
 
-**API Server:**
-```bash
-make run-api                    # Run FastAPI server on localhost:8000
-poetry run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+## Architecture
+
+### StyleGAN2-ADA
+- **Mapping Network**: z → w latent space transformation
+- **Synthesis Network**: Style-modulated image generation
+- **Discriminator**: With Adaptive Discriminator Augmentation (ADA)
+- **Class Conditioning**: Gram-positive/Gram-negative via embeddings
+- **Image Size**: 256x256 RGB
+
+### Key Features
+- **ADA**: Prevents discriminator overfitting on limited data
+- **R1 Regularization**: Gradient penalty for stable training
+- **Path Length Regularization**: Smooth latent space mapping
+- **Lazy Regularization**: Efficient computation (R1 every 16 steps)
+- **Simplified Mode**: Resource-constrained training (<16GB VRAM)
+
+## Project Structure
+
+```
+src/bacterial_gan/
+├── models/
+│   ├── stylegan2_ada.py     # Generator + Discriminator architecture
+│   ├── stylegan2_wrapper.py # Training wrapper
+│   └── losses.py            # R1, path length, logistic loss
+├── pipelines/
+│   ├── train_pipeline.py    # Training with MLflow
+│   ├── evaluate_pipeline.py # FID, IS, accuracy
+│   └── generate_data_pipeline.py
+├── data/
+│   ├── dataset.py           # Data loading
+│   └── data_processing.py   # Patch extraction, augmentation
+├── config.py                # Pydantic settings
+└── cli.py                   # Typer CLI
+
+app/                         # FastAPI application
+configs/config.yaml          # Configuration
 ```
 
-**Cleanup:**
-```bash
-make clean                      # Remove cache files and __pycache__
+## Configuration
+
+```yaml
+training:
+  # Architecture
+  use_simplified: true       # For <16GB VRAM
+  latent_dim: 256
+  
+  # Training
+  batch_size: 12
+  epochs: 300
+  learning_rate_g: 0.0002
+  learning_rate_d: 0.0002
+  
+  # Regularization
+  r1_gamma: 10.0
+  r1_interval: 16
+  pl_weight: 2.0
+  pl_interval: 4
+  
+  # ADA
+  use_ada: true
+  ada_target: 0.6
 ```
 
-## Architecture Overview
+## MLflow
 
-### GAN Architecture
-- **Generator**: ResNet based conditional generator that takes noise + class label and produces synthetic bacterial images
-- **Discriminator**: PatchGAN discriminator that focuses on local texture patterns and class conditioning
-- **Model Type**: Conditional GAN (cGAN) for class-specific image generation
-- **Image Size**: 256x256 pixels, 3 channels (RGB)
-- **Classes**: 2 (Gram-positive and Gram-negative bacteria)
+Training runs are tracked with:
+- Parameters: All training config
+- Metrics: generator_loss, discriminator_loss, r1_penalty, ada_probability
+- Artifacts: Sample images, checkpoints, final model
 
-### Key Components
+Use run ID for evaluation and generation.
 
-**Data Pipeline (`src/data/`):**
-- `data_processing.py`: Macenko color normalization for stain-invariant preprocessing
-- `dataset.py`: Dataset loading and augmentation utilities
-- Data directories: `data/01_raw/`, `data/02_processed/`, `data/03_synthetic/`
+## Development
 
-**Models (`src/models/`):**
-- `architecture.py`: Generator and Discriminator definitions (ResNet, PatchGAN)
-  - Supports custom layers: SpectralNormalization, SelfAttention
-  - Multiple loss functions: adversarial (WGAN-GP/LSGAN), reconstruction (L1/L2), perceptual (VGG-based)
-- `gan_wrapper.py`: High-level GAN wrapper for training and inference
-
-**Pipelines (`src/pipelines/`):**
-- `train_pipeline.py`: Full training loop with MLflow tracking
-- `evaluate_pipeline.py`: Model evaluation (FID, IS, classification accuracy)
-- `generate_data_pipeline.py`: Synthetic data generation from trained models
-
-**API (`app/`):**
-- `main.py`: FastAPI application entry point
-- `api/v1/endpoints.py`: API endpoints for inference and model management
-- `api/v1/schemas.py`: Request/response schemas
-- `core/dependencies.py`: Dependency injection (model registry, etc.)
-
-**CLI (`src/cli.py`):**
-- Typer-based CLI with commands: train, evaluate, generate-data
-- All commands support `--config-path` for custom configurations
-
-### Configuration System
-
-Configuration is centralized in `configs/config.yaml`:
-- `app`: API settings (title, version)
-- `data`: Data directory paths
-- `preprocessing`: Image size, channels
-- `model`: Architecture selection (ResNet, PatchGAN, cGAN)
-- `training`: Optimizer, learning rate, batch size, epochs
-
-Access via `src/config.py` using `get_settings(config_path)`.
-
-### MLflow Integration
-
-All training runs are tracked in MLflow:
-- Experiment name: "Bacterial GAN Augmentation"
-- Logged parameters: training config, data config
-- Logged metrics: generator_loss, discriminator_loss (per epoch)
-- Logged artifacts: Generated sample images, model checkpoints
-- Model Registry: Models registered as "bacterial-gan-generator"
-- Run IDs are required for evaluation and data generation
-
-To access trained models, use the MLflow run ID from training output.
-
-## Development Workflow
-
-1. **Pre-commit Hooks**: Automatically run on git commit
-   - Trailing whitespace removal
-   - End-of-file fixer
-   - YAML syntax checking
-   - Large file detection
-   - isort (with black profile)
-   - black formatting
-   - flake8 linting
-
-2. **Code Style**: This project follows black formatting with isort for imports (black profile)
-
-3. **DVC Pipeline**: Training and generation pipelines are managed by DVC (see `dvc.yaml`)
-   - Stage names: `train`, `generate`
-   - Use `dvc repro <stage>` to reproduce pipelines
-
-4. **Model Storage**: Trained models are stored in `models/` directory
-   - Example: `models/model_cgan_hasil_training.h5`
-   - MLflow also stores models in its artifact store
-
-5. **Module Import**: The project uses package name `bacterial_gan` (with underscore)
-   - Import from modules as: `from bacterial_gan.config import get_settings`
-   - CLI is accessible as: `bacterial-gan` (with hyphen)
-
-## Key Implementation Notes
-
-- **Macenko Normalization**: Critical preprocessing step for bacterial images to normalize stain variations
-- **Class Conditioning**: GAN is conditioned on bacterial class (Gram-positive vs Gram-negative)
-- **Evaluation Metrics**: Use FID (Fréchet Inception Distance), IS (Inception Score), and classification accuracy
-- **Training Stability**: Consider using spectral normalization and gradient penalty for stable GAN training
-- **API Design**: Designed to support model inference, model management, health checks, file uploads, and real-time progress tracking
-
-## File Locations
-
-- Source code: `src/`
-- API code: `app/`
-- Tests: `tests/`
-- Configs: `configs/`
-- Training scripts: `scripts/`
-- Notebooks: `notebooks/`
-- Documentation: `docs/` (currently sparse)
-- Models: `models/`
-- Data: `data/` (organized as 01_raw, 02_processed, 03_synthetic)
+1. **Pre-commit**: black, isort, flake8
+2. **DVC Pipeline**: `dvc.yaml` defines train/generate stages
+3. **Package**: Import as `bacterial_gan`, CLI as `bacterial-gan`

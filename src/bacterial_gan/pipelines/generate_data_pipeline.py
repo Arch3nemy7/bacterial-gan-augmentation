@@ -1,83 +1,80 @@
 """
-Pipeline for generating synthetic data using trained GAN model.
+Pipeline for generating synthetic bacterial images using trained StyleGAN2-ADA.
 
-This pipeline should:
-1. Load trained model from MLflow
-2. Generate data with balanced class distribution
+Steps:
+1. Load model from MLflow
+2. Generate balanced class samples
 3. Apply quality filtering
-4. Save generated data with proper metadata
-5. Create evaluation reports
-6. Integration with expert evaluation workflow
+4. Save with metadata
 """
+
+import logging
+from pathlib import Path
+from typing import Dict, List
 
 import mlflow
 import numpy as np
-from pathlib import Path
-from typing import Dict, List
-import logging
+
 from ..config import Settings
-from ..models.gan_wrapper import ConditionalGAN
-from ..utils import calculate_fid_score, save_checkpoint
+from ..models.stylegan2_wrapper import StyleGAN2ADA
+
 
 def run(settings: Settings, run_id: str, num_images: int):
-    """
-    Run synthetic data generation pipeline.
-
-    Steps:
-    1. Load model from MLflow run
-    2. Generate specified number of images per class
-    3. Apply quality filtering using FID threshold
-    4. Save images with proper directory structure
-    5. Generate metadata and evaluation report
-    6. Log artifacts to MLflow for tracking
-    """
-    
+    """Generate synthetic images using trained model."""
     mlflow.set_experiment("Bacterial GAN Augmentation")
-    
-    with mlflow.start_run(run_name=f"data_generation_{run_id}") as run:
-        logging.info(f"Starting data generation pipeline for run {run_id}")
-        
-        # 1. Load trained model
+
+    with mlflow.start_run(run_name=f"generation_{run_id}"):
+        logging.info(f"Generating {num_images} images from {run_id}")
+
+        # 1. Load model
         model = load_model_from_mlflow(run_id)
-        
+
         # 2. Generate balanced dataset
         synthetic_data = generate_balanced_dataset(
-            model, 
-            num_images, 
-            settings.data.processed_data_dir
+            model, num_images, settings.data.processed_data_dir
         )
-        
+
         # 3. Quality filtering
         filtered_data = apply_quality_filter(synthetic_data, settings)
-        
+
         # 4. Save generated data
         save_path = save_synthetic_data(filtered_data, settings.data.synthetic_data_dir)
-        
-        # 5. Generate evaluation report
-        evaluation_report = create_evaluation_report(filtered_data, settings)
-        
+
+        # 5. Create report
+        report = create_generation_report(filtered_data, settings)
+
         # 6. Log artifacts
-        mlflow.log_artifacts(save_path)
-        mlflow.log_dict(evaluation_report, "generation_report.json")
-        
-        logging.info("Data generation pipeline completed successfully")
+        mlflow.log_artifacts(str(save_path))
+        mlflow.log_dict(report, "generation_report.json")
 
-def load_model_from_mlflow(run_id: str) -> ConditionalGAN:
-    """Load trained GAN model from MLflow registry."""
+        logging.info("Generation complete")
+
+
+def load_model_from_mlflow(run_id: str) -> StyleGAN2ADA:
+    """Load trained model from MLflow."""
+    # TODO: Load generator weights from MLflow artifacts
     pass
 
-def generate_balanced_dataset(model: ConditionalGAN, num_images: int, reference_dir: Path) -> List:
-    """Generate dataset with balanced class distribution."""
+
+def generate_balanced_dataset(model: StyleGAN2ADA, num_images: int, reference_dir: Path) -> List:
+    """Generate balanced samples for each class."""
+    # TODO: Use model.generate_samples() with class labels
     pass
+
 
 def apply_quality_filter(generated_data: List, settings: Settings) -> List:
-    """Filter generated images based on quality metrics."""
+    """Filter based on quality metrics."""
+    # TODO: Implement FID-based filtering
     pass
+
 
 def save_synthetic_data(data: List, output_dir: Path) -> Path:
-    """Save generated images with proper structure and metadata."""
+    """Save generated images."""
+    # TODO: Save with proper directory structure
     pass
 
-def create_evaluation_report(data: List, settings: Settings) -> Dict:
-    """Create comprehensive evaluation report for generated data."""
+
+def create_generation_report(data: List, settings: Settings) -> Dict:
+    """Create generation report."""
+    # TODO: Include statistics and metadata
     pass
