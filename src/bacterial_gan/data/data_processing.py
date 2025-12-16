@@ -75,7 +75,7 @@ def create_data_splits(
     apply_augmentation: bool = True,
     bg_threshold: float = 0.9,
     use_patch_extraction: bool = True,
-    crop_mode: str = "resize",  # 'resize', 'center', or 'random'
+    crop_mode: str = "resize",
     max_patches_per_split: int | None = None,
 ) -> None:
     """Split raw data into train/val/test sets with patch extraction."""
@@ -95,9 +95,15 @@ def create_data_splits(
         print("  Mode: Patch Extraction")
         print(f"  Background filtering: >={bg_threshold*100}% white pixels")
     else:
-        mode_names = {"resize": "Resize", "center": "Center Crop", "random": "Random Crop"}
+        mode_names = {
+            "none": "Original (no resize)",
+            "resize": "Resize",
+            "center": "Center Crop",
+            "random": "Random Crop",
+        }
         print(f"  Mode: {mode_names.get(crop_mode, crop_mode)}")
-    print(f"  Target size: {patch_size}x{patch_size}")
+    if crop_mode != "none" or use_patch_extraction:
+        print(f"  Target size: {patch_size}x{patch_size}")
     print(f"  Augmentation: {'8x' if apply_augmentation else 'Disabled'}")
     if max_patches_per_split:
         print(f"  Max patches per split: {max_patches_per_split}")
@@ -170,28 +176,27 @@ def create_data_splits(
                     else:
                         h, w = img_array.shape[:2]
 
-                        if crop_mode == "resize":
-                            # Resize entire image to target size
+                        if crop_mode == "none":
+                            patches = [img_array]
+
+                        elif crop_mode == "resize":
                             img_resized = Image.fromarray(img_array).resize(
                                 (patch_size, patch_size), Image.Resampling.LANCZOS
                             )
                             patches = [np.array(img_resized)]
 
                         elif crop_mode == "center":
-                            # Center crop
                             if h >= patch_size and w >= patch_size:
                                 y = (h - patch_size) // 2
                                 x = (w - patch_size) // 2
                                 patches = [img_array[y : y + patch_size, x : x + patch_size]]
                             else:
-                                # Image too small, resize instead
                                 img_resized = Image.fromarray(img_array).resize(
                                     (patch_size, patch_size), Image.Resampling.LANCZOS
                                 )
                                 patches = [np.array(img_resized)]
 
-                        else:  # crop_mode == "random"
-                            # Random crop
+                        else:
                             if h >= patch_size and w >= patch_size:
                                 local_seed = int(src_file.stat().st_size + idx) % (2**32)
                                 rng = np.random.RandomState(local_seed)
@@ -199,7 +204,6 @@ def create_data_splits(
                                 x = rng.randint(0, w - patch_size + 1)
                                 patches = [img_array[y : y + patch_size, x : x + patch_size]]
                             else:
-                                # Image too small, resize instead
                                 img_resized = Image.fromarray(img_array).resize(
                                     (patch_size, patch_size), Image.Resampling.LANCZOS
                                 )

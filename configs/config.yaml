@@ -10,7 +10,7 @@ data:
 
 preprocessing:
   use_patch_extraction: false
-  crop_mode: "resize"  # 'resize', 'center', or 'random' (when patch extraction disabled)
+  crop_mode: "none"  # 'none', 'resize', 'center', or 'random' (when patch extraction disabled)
   image_size: 256
   apply_augmentation: false
   bg_threshold: 0.9
