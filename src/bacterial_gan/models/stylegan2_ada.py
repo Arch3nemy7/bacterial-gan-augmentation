@@ -390,50 +390,52 @@ class AdaptiveAugmentation(layers.Layer):
             return images
 
         batch_size = tf.shape(images)[0]
-        do_aug = tf.random.uniform([], 0.0, 1.0) < self.p
 
-        if not do_aug:
+        def apply_augmentation():
+            aug_images = images
+
+            aug_images = aug_images + tf.random.uniform([batch_size, 1, 1, 1], -0.2, 0.2)
+            contrast = tf.random.uniform([batch_size, 1, 1, 1], 0.8, 1.2)
+            aug_images = aug_images * contrast
+
+            gray = tf.reduce_mean(aug_images, axis=-1, keepdims=True)
+            sat = tf.random.uniform([batch_size, 1, 1, 1], 0.8, 1.2)
+            aug_images = gray + sat * (aug_images - gray)
+
+            tx = tf.random.uniform([batch_size], -0.125, 0.125)
+            ty = tf.random.uniform([batch_size], -0.125, 0.125)
+
+            h, w = tf.shape(aug_images)[1], tf.shape(aug_images)[2]
+            transforms = tf.stack(
+                [
+                    tf.ones(batch_size),
+                    tf.zeros(batch_size),
+                    tx * tf.cast(w, tf.float32),
+                    tf.zeros(batch_size),
+                    tf.ones(batch_size),
+                    ty * tf.cast(h, tf.float32),
+                    tf.zeros(batch_size),
+                    tf.zeros(batch_size),
+                ],
+                axis=1,
+            )
+
+            aug_images = tf.raw_ops.ImageProjectiveTransformV3(
+                images=aug_images,
+                transforms=transforms,
+                output_shape=tf.shape(aug_images)[1:3],
+                interpolation="BILINEAR",
+                fill_mode="REFLECT",
+                fill_value=0.0,
+            )
+
+            return tf.clip_by_value(aug_images, -1.0, 1.0)
+
+        def no_augmentation():
             return images
 
-        # Brightness and contrast
-        images = images + tf.random.uniform([batch_size, 1, 1, 1], -0.2, 0.2)
-        contrast = tf.random.uniform([batch_size, 1, 1, 1], 0.8, 1.2)
-        images = images * contrast
-
-        # Saturation
-        if images.shape[-1] == 3:
-            gray = tf.reduce_mean(images, axis=-1, keepdims=True)
-            sat = tf.random.uniform([batch_size, 1, 1, 1], 0.8, 1.2)
-            images = gray + sat * (images - gray)
-
-        # Translation
-        tx = tf.random.uniform([batch_size], -0.125, 0.125)
-        ty = tf.random.uniform([batch_size], -0.125, 0.125)
-
-        h, w = tf.shape(images)[1], tf.shape(images)[2]
-        transforms = tf.stack(
-            [
-                tf.ones(batch_size),
-                tf.zeros(batch_size),
-                tx * tf.cast(w, tf.float32),
-                tf.zeros(batch_size),
-                tf.ones(batch_size),
-                ty * tf.cast(h, tf.float32),
-                tf.zeros(batch_size),
-                tf.zeros(batch_size),
-            ],
-            axis=1,
-        )
-
-        images = tf.raw_ops.ImageProjectiveTransformV3(
-            images=images,
-            transforms=transforms,
-            output_shape=tf.shape(images)[1:3],
-            interpolation="BILINEAR",
-            fill_mode="REFLECT",
-        )
-
-        return tf.clip_by_value(images, -1.0, 1.0)
+        do_aug = tf.random.uniform([], 0.0, 1.0) < self.p
+        return tf.cond(do_aug, apply_augmentation, no_augmentation)
 
 
 class StyleGAN2Discriminator(keras.Model):
@@ -530,11 +532,20 @@ class SimplifiedStyleGAN2Generator(keras.Model):
 
         self.mapping = MappingNetwork(latent_dim=latent_dim, num_layers=4, num_classes=num_classes)
 
-        self.dense = layers.Dense(8 * 8 * 256, use_bias=False)
-        self.reshape = layers.Reshape((8, 8, 256))
+        self.num_blocks = int(np.log2(image_size)) - 2
+
+        self.start_size = 4
+        self.start_channels = 256
+
+        self.dense = layers.Dense(
+            self.start_size * self.start_size * self.start_channels, use_bias=False
+        )
+        self.reshape = layers.Reshape((self.start_size, self.start_size, self.start_channels))
 
         self.blocks = []
-        channel_progression = [256, 192, 128, 96, 64]
+
+        all_channels = [256, 192, 128, 96, 64, 32]
+        channel_progression = all_channels[: self.num_blocks]
 
         for out_channels in channel_progression:
             self.blocks.append(
@@ -595,8 +606,11 @@ class SimplifiedStyleGAN2Discriminator(keras.Model):
         if use_ada:
             self.ada = AdaptiveAugmentation(p=0.0, target=ada_target)
 
+        self.num_blocks = int(np.log2(image_size)) - 2
+
         self.blocks = []
-        channel_progression = [64, 96, 128, 192, 256]
+        all_channels = [64, 96, 128, 192, 256, 256]
+        channel_progression = all_channels[: self.num_blocks]
 
         for out_channels in channel_progression:
             self.blocks.append(
@@ -606,6 +620,9 @@ class SimplifiedStyleGAN2Discriminator(keras.Model):
                     "dropout": layers.Dropout(0.2),
                 }
             )
+
+        final_channels = channel_progression[-1] if channel_progression else 64
+        self.final_feature_size = 4 * 4 * final_channels
 
         self.flatten = layers.Flatten()
         self.dense1 = layers.Dense(256)

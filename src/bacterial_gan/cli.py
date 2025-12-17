@@ -45,7 +45,7 @@ def train(
 
     Examples:
         bacterial-gan train
-        bacterial-gan train --resume-from-checkpoint models/RUN_ID/checkpoint_epoch_0150.npy
+        bacterial-gan train --resume-from-checkpoint mlruns/.../checkpoints/checkpoint_epoch_0150.npy
         bacterial-gan train --resume-from-run-id RUN_ID --resume-from-epoch 150
     """
     checkpoint_path = None
@@ -66,11 +66,15 @@ def train(
         checkpoint_path = str(checkpoint_path)
 
     elif resume_from_run_id and resume_from_epoch:
-        checkpoint_path = Path(
-            f"models/{resume_from_run_id}/checkpoint_epoch_{resume_from_epoch:04d}.npy"
-        )
-        if not checkpoint_path.exists():
-            typer.secho(f"❌ Checkpoint not found: {checkpoint_path}", fg=typer.colors.RED)
+        import glob
+
+        mlruns_pattern = f"mlruns/*/{ resume_from_run_id}/artifacts/checkpoints/checkpoint_epoch_{resume_from_epoch:04d}.npy"
+        matches = glob.glob(mlruns_pattern)
+        if matches:
+            checkpoint_path = Path(matches[0])
+        else:
+            typer.secho(f"❌ Checkpoint not found in MLflow artifacts", fg=typer.colors.RED)
+            typer.secho(f"   Searched: {mlruns_pattern}", fg=typer.colors.YELLOW)
             raise typer.Exit(code=1)
         typer.echo(f"📂 Resuming: run={resume_from_run_id}, epoch={resume_from_epoch}")
         checkpoint_path = str(checkpoint_path)

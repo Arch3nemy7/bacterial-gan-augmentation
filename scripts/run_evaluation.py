@@ -77,44 +77,34 @@ def main():
     """Main execution function."""
     args = parse_arguments()
     
-    # Setup logging
     log_level = logging.DEBUG if args.debug else logging.INFO
     setup_logging(level=log_level)
     
     try:
-        # Validate run ID
         if not validate_run_id(args.run_id):
             logging.error(f"Invalid or non-existent run ID: {args.run_id}")
             sys.exit(1)
         
-        # Load configuration
         settings = get_settings(args.config)
         logging.info(f"Loaded configuration from {args.config}")
         
-        # Create output directory
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        # Run evaluation pipeline
         logging.info(f"Starting evaluation for model {args.run_id}...")
         evaluation_results = evaluate_run(settings, args.run_id)
         
-        # Save results
         results_file = output_dir / f"evaluation_{args.run_id}.json"
         with open(results_file, 'w') as f:
             json.dump(evaluation_results, f, indent=2)
         
         logging.info(f"Evaluation results saved to {results_file}")
         
-        # Compare with other models if requested
         if args.compare_with:
             logging.info("Running model comparison...")
-            # Implementation for model comparison
 
-        # Generate detailed report if requested
         if args.generate_report:
             logging.info("Generating detailed HTML report...")
-            # Implementation for HTML report generation
         
         logging.info("Evaluation completed successfully!")
         

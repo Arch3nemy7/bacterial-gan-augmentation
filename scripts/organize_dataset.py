@@ -38,8 +38,6 @@ def get_gram_type_from_json(json_path: Path) -> str | None:
             label = shape.get("label", "").upper()
             labels.add(label)
 
-        # Determine Gram type
-        # G+ = Gram-positive, G = Gram-negative
         if "G+" in labels:
             return "gram_positive"
         elif "G" in labels:
@@ -78,7 +76,6 @@ def organize_deepdataset(
     if not json_dir.exists():
         raise FileNotFoundError(f"JSON directory not found: {json_dir}")
 
-    # Create output directories
     gram_positive_dir = output_dir / "gram_positive"
     gram_negative_dir = output_dir / "gram_negative"
 
@@ -95,17 +92,14 @@ def organize_deepdataset(
         "errors": [],
     }
 
-    # Get all JSON files
     json_files = sorted(json_dir.glob("*.json"))
     print(f"\n📁 Found {len(json_files)} JSON annotation files")
 
     for idx, json_path in enumerate(json_files, 1):
-        # Get corresponding image path
         image_name = json_path.stem + ".jpg"
         image_path = images_dir / image_name
 
         if not image_path.exists():
-            # Try other extensions
             for ext in [".png", ".jpeg", ".JPG", ".PNG"]:
                 alt_path = images_dir / (json_path.stem + ext)
                 if alt_path.exists():
@@ -116,14 +110,12 @@ def organize_deepdataset(
             stats["no_image"] += 1
             continue
 
-        # Get Gram type from JSON
         gram_type = get_gram_type_from_json(json_path)
 
         if gram_type is None:
             stats["no_label"] += 1
             continue
 
-        # Determine destination
         if gram_type == "gram_positive":
             dest_dir = gram_positive_dir
             stats["gram_positive"] += 1
@@ -133,11 +125,9 @@ def organize_deepdataset(
 
         dest_path = dest_dir / image_path.name
 
-        # Progress indicator
         if idx % 500 == 0 or idx == len(json_files):
             print(f"  [{idx}/{len(json_files)}] Processing...")
 
-        # Copy or move file
         if not dry_run:
             try:
                 if copy_files:

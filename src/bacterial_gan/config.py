@@ -79,11 +79,9 @@ class TrainingConfig(BaseModel):
     memory_optimization: MemoryOptimizationConfig = MemoryOptimizationConfig()
     checkpoint_interval: int = 50
     sample_interval: int = 10
-    num_samples_during_training: int = 4
+    num_samples_during_training: int = 2
     num_samples_final: int = 8
     num_samples_grid: int = 16
-    models_output_dir: str = "models"
-    samples_output_dir: str = "samples"
     mlflow_experiment_name: str = "Bacterial GAN Augmentation"
     mlflow_tracking_uri: str = ""
     dummy_num_batches: int = 10

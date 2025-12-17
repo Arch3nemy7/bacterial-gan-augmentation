@@ -19,12 +19,10 @@ def configure_cpu_parallelism(num_threads: Optional[int] = None) -> None:
         num_threads: Number of CPU threads to use (None = auto-detect)
     """
     if num_threads is None:
-        # Use config value or auto-detect
         num_threads = settings.training.memory_optimization.cpu_threads
         if num_threads is None:
             num_threads = os.cpu_count() or 12
 
-    # Set TensorFlow thread pool sizes
     tf.config.threading.set_inter_op_parallelism_threads(num_threads)
     tf.config.threading.set_intra_op_parallelism_threads(num_threads)
 
@@ -51,12 +49,10 @@ def configure_tensorflow_memory(gpu_memory_limit_mb: Optional[int] = None) -> No
 
     if gpus:
         try:
-            # Use config value if argument is not provided
             if gpu_memory_limit_mb is None:
                 gpu_memory_limit_mb = settings.training.memory_optimization.gpu_memory_limit_mb
 
             if gpu_memory_limit_mb:
-                # Option 1: Hard memory limit (fixed allocation)
                 for gpu in gpus:
                     tf.config.set_logical_device_configuration(
                         gpu,
@@ -66,7 +62,6 @@ def configure_tensorflow_memory(gpu_memory_limit_mb: Optional[int] = None) -> No
                     )
                 print(f"✓ GPU memory limit: {gpu_memory_limit_mb} MB ({len(gpus)} GPU(s))")
             elif settings.training.memory_optimization.gpu_memory_growth:
-                # Option 2: Memory growth (dynamic allocation)
                 for gpu in gpus:
                     tf.config.experimental.set_memory_growth(gpu, True)
                 print(f"✓ GPU memory growth enabled for {len(gpus)} GPU(s)")
@@ -124,11 +119,9 @@ def get_memory_info() -> dict:
     """
     info = {}
 
-    # GPU memory
     gpus = tf.config.list_physical_devices('GPU')
     if gpus:
         try:
-            # Get GPU memory info
             gpu_info = tf.config.experimental.get_memory_info('GPU:0')
             info['gpu_current_mb'] = gpu_info['current'] / (1024 * 1024)
             info['gpu_peak_mb'] = gpu_info['peak'] / (1024 * 1024)
@@ -170,7 +163,6 @@ def optimize_dataset_pipeline(
     Returns:
         Optimized dataset with CPU/GPU pipelining
     """
-    # Apply defaults from config if not provided
     if prefetch_buffer is None:
         prefetch_buffer = settings.training.memory_optimization.dataset_prefetch_buffer
         if prefetch_buffer == -1:
@@ -182,24 +174,18 @@ def optimize_dataset_pipeline(
     if cache_filename is None:
         cache_filename = settings.training.memory_optimization.dataset_cache_filename
 
-    # Batch first (before caching to reduce cache size)
     dataset = dataset.batch(batch_size, drop_remainder=True)
 
-    # Optional caching
     if cache_filename:
-        # Disk-based caching (safe for large datasets)
         dataset = dataset.cache(cache_filename)
         print(f"  ✓ Disk-based caching enabled: {cache_filename}")
     elif cache_in_memory:
-        # In-memory caching (ONLY for small datasets)
         dataset = dataset.cache()
         print("  ✓ In-memory caching enabled (ensure dataset fits in RAM)")
         print("  ⚠️  WARNING: May cause OOM with large patch-based datasets")
     else:
         print("  ✓ Caching disabled (memory-safe mode)")
 
-    # Prefetch: CPU prepares N batches while GPU trains
-    # This keeps GPU busy at 100% utilization
     dataset = dataset.prefetch(buffer_size=prefetch_buffer)
 
     return dataset
@@ -221,7 +207,6 @@ class GradientAccumulator:
             gradients = tape.gradient(loss, model.trainable_variables)
             accumulator.accumulate(gradients)
 
-        # Apply accumulated gradients
         optimizer.apply_gradients(zip(accumulator.gradients, model.trainable_variables))
         accumulator.reset()
     """
@@ -245,11 +230,9 @@ class GradientAccumulator:
             gradients: List of gradient tensors
         """
         if self.gradients is None:
-            # Initialize on first call
             self.gradients = [tf.Variable(tf.zeros_like(g), trainable=False)
                             for g in gradients]
 
-        # Add gradients
         for i, g in enumerate(gradients):
             if g is not None:
                 self.gradients[i].assign_add(g / self.accumulation_steps)

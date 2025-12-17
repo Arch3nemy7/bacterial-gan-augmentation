@@ -106,21 +106,6 @@ else
 fi
 
 echo ""
-echo "🗑️  Removing generated models (optional)..."
-if ls models/*.h5 2>/dev/null || ls models/*.keras 2>/dev/null; then
-    read -p "Do you want to remove trained models in models/? (y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        rm -rf models/*.h5 models/*.keras 2>/dev/null || true
-        echo "✅ Models removed"
-    else
-        echo "⏭️  Keeping trained models"
-    fi
-else
-    echo "⏭️  No trained models found"
-fi
-
-echo ""
 echo "============================================="
 echo "Cleanup Complete!"
 echo "============================================="

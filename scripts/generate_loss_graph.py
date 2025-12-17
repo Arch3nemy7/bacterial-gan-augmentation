@@ -39,7 +39,6 @@ def main():
 
     plt.figure(figsize=(12, 10))
     
-    # Plot 1: Generator and Discriminator Loss
     plt.subplot(1, 1, 1)
     plt.plot(g_steps, g_values, label='Generator Loss', color='blue', alpha=0.7)
     plt.plot(d_steps, d_values, label='Discriminator Loss', color='red', alpha=0.7)

@@ -19,7 +19,6 @@ def test_stylegan2_ada():
     print("STYLEGAN2-ADA ARCHITECTURE TEST")
     print("=" * 60)
 
-    # Test build_stylegan2_ada factory
     print("\n1. Testing build_stylegan2_ada...")
     models = build_stylegan2_ada(
         latent_dim=256,
@@ -34,7 +33,6 @@ def test_stylegan2_ada():
     print(f"   ✅ Generator: {generator.name}")
     print(f"   ✅ Discriminator: {discriminator.name}")
 
-    # Test forward pass
     print("\n2. Testing forward pass...")
     noise = tf.random.normal([2, 256])
     labels = tf.constant([0, 1], dtype=tf.int32)
@@ -48,7 +46,6 @@ def test_stylegan2_ada():
     print(f"   ✅ Real logits: {real_logits.shape}")
     print(f"   ✅ Fake logits: {fake_logits.shape}")
 
-    # Test StyleGAN2ADA wrapper
     print("\n3. Testing StyleGAN2ADA wrapper...")
     gan = StyleGAN2ADA(
         latent_dim=256,
@@ -61,7 +58,6 @@ def test_stylegan2_ada():
     print(f"   ✅ Generator params: {gan.generator.count_params():,}")
     print(f"   ✅ Discriminator params: {gan.discriminator.count_params():,}")
 
-    # Test sample generation
     print("\n4. Testing sample generation...")
     samples = gan.generate_samples(num_samples=4)
     print(f"   ✅ Samples: {samples.shape}")

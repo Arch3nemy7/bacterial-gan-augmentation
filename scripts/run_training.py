@@ -18,7 +18,6 @@ from pathlib import Path
 import signal
 import traceback
 
-# Add src to path for importing modules
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from config import get_settings
@@ -58,8 +57,6 @@ def setup_signal_handlers():
     """Setup signal handlers for graceful shutdown."""
     def signal_handler(sig, frame):
         logging.info("Received interrupt signal. Shutting down gracefully...")
-        # Save current model state
-        # Clean up resources
         sys.exit(0)
     
     signal.signal(signal.SIGINT, signal_handler)
@@ -74,7 +71,6 @@ def validate_environment():
         import PIL
         logging.info("All required dependencies are available")
 
-        # Check GPU availability
         if tf.config.list_physical_devices('GPU'):
             logging.info("GPU detected and available")
         else:
@@ -89,19 +85,15 @@ def main():
     """Main execution function."""
     args = parse_arguments()
     
-    # Setup logging
     log_level = logging.DEBUG if args.debug else logging.INFO
     setup_logging(level=log_level)
     
-    # Setup signal handlers
     setup_signal_handlers()
     
-    # Validate environment
     if not validate_environment():
         sys.exit(1)
     
     try:
-        # Load configuration
         settings = get_settings(args.config)
         logging.info(f"Loaded configuration from {args.config}")
         
@@ -110,7 +102,6 @@ def main():
             logging.info("Configuration is valid. Exiting.")
             sys.exit(0)
         
-        # Run training pipeline
         logging.info("Starting training pipeline...")
         train_run(settings, resume_from=args.resume)
         

@@ -17,14 +17,17 @@ data/01_raw/*
 data/02_processed/*
 data/03_synthetic/*
 data/04_expert_testing/*
+data/05_models/*
 !data/*/.gitkeep
 !data/*/*/.gitkeep
 *.npy
-samples/
 *.h5
 *.keras
+models/
+samples/
 
 # MLflow
+runs/
 mlruns/
 mlartifacts/
 

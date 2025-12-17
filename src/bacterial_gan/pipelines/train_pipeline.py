@@ -44,8 +44,13 @@ def save_sample_images(
     generated_images = (generated_images + 1.0) / 2.0
     generated_images = np.clip(generated_images, 0.0, 1.0).astype(np.float32)
 
-    grid_size = int(np.sqrt(num_samples))
-    fig, axes = plt.subplots(grid_size, grid_size, figsize=(12, 12))
+    grid_cols = int(np.ceil(np.sqrt(num_samples)))
+    grid_rows = int(np.ceil(num_samples / grid_cols))
+
+    fig, axes = plt.subplots(grid_rows, grid_cols, figsize=(12, 12))
+    
+    if not isinstance(axes, np.ndarray):
+        axes = np.array([axes])
     axes = axes.flatten()
 
     class_names = ["Gram-Positive", "Gram-Negative"]
@@ -70,7 +75,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
     print("=" * 80)
     print()
 
-    # Configure hardware
     print("🔧 Configuring TensorFlow...")
     configure_tensorflow_memory()
     configure_cpu_parallelism(num_threads=12)
@@ -78,7 +82,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
     clear_session()
     print()
 
-    # Set MLflow experiment
     experiment_name = "Bacterial GAN Augmentation"
     try:
         mlflow.set_experiment(experiment_name)
@@ -97,7 +100,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         print(f"📊 MLflow Run ID: {run_id}")
         print()
 
-        # Log parameters
         mlflow.log_params(
             {
                 "image_size": settings.training.image_size,
@@ -116,7 +118,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             }
         )
 
-        # Initialize GAN
         gan = StyleGAN2ADA(
             latent_dim=settings.training.latent_dim,
             num_classes=2,
@@ -139,7 +140,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         )
         print()
 
-        # Create fixed noise for consistent evaluation
         fixed_num_samples = settings.training.num_samples_during_training
         fixed_samples_per_class = fixed_num_samples // 2
         fixed_labels = []
@@ -150,7 +150,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         fixed_labels = tf.constant(fixed_labels, dtype=tf.int32)
         fixed_noise = tf.random.normal([fixed_num_samples, settings.training.latent_dim])
 
-        # Resume from checkpoint
         start_epoch = 0
         if resume_from_checkpoint:
             print(f"⏸️  Resuming from: {resume_from_checkpoint}")
@@ -158,7 +157,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             start_epoch = checkpoint["epoch"] + 1
             print()
 
-        # Load dataset
         print("📂 Loading dataset...")
         processed_data_path = Path(settings.data.processed_data_dir) / "train"
 
@@ -190,17 +188,18 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
 
         print()
 
-        # Create output directories
-        models_dir = Path("models") / run_id
-        samples_dir = Path("samples") / run_id
-        models_dir.mkdir(parents=True, exist_ok=True)
-        samples_dir.mkdir(parents=True, exist_ok=True)
-
-        # Training loop
         print("=" * 80)
         print("🚀 TRAINING")
         print("=" * 80)
         print()
+
+        import tempfile
+
+        temp_dir = Path(tempfile.mkdtemp(prefix="stylegan2_"))
+        samples_dir = temp_dir / "samples"
+        checkpoints_dir = temp_dir / "checkpoints"
+        samples_dir.mkdir(parents=True, exist_ok=True)
+        checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
         for epoch in range(start_epoch, settings.training.epochs):
             epoch_start_time = time.time()
@@ -248,7 +247,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                 f"📈 Epoch {epoch+1}: G={gen_loss:.4f} D={disc_loss:.4f} R1={r1_penalty:.4f} ADA={ada_p:.4f} ({epoch_time:.1f}s)"
             )
 
-            # Save samples
             if (epoch + 1) % settings.training.sample_interval == 0 or epoch == 0:
                 sample_path = save_sample_images(
                     gan,
@@ -260,9 +258,8 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                 )
                 mlflow.log_artifact(sample_path, "samples")
 
-            # Save checkpoint
             if (epoch + 1) % settings.training.checkpoint_interval == 0:
-                checkpoint_path = models_dir / f"checkpoint_epoch_{epoch+1:04d}.npy"
+                checkpoint_path = checkpoints_dir / f"checkpoint_epoch_{epoch+1:04d}.npy"
                 gan.save_checkpoint(
                     str(checkpoint_path),
                     epoch=epoch,
@@ -270,14 +267,12 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                 )
                 mlflow.log_artifact(str(checkpoint_path), "checkpoints")
 
-        # Training complete
         print()
         print("=" * 80)
         print("✅ TRAINING COMPLETE")
         print("=" * 80)
 
-        # Save final model
-        final_model_path = models_dir / "generator_final.keras"
+        final_model_path = temp_dir / "generator_final.keras"
         gan.save_generator(str(final_model_path))
 
         mlflow.tensorflow.log_model(
@@ -286,7 +281,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             registered_model_name="bacterial-gan-generator",
         )
 
-        # Final samples
         final_sample_path = save_sample_images(
             gan,
             settings.training.epochs,
@@ -295,10 +289,13 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         )
         mlflow.log_artifact(final_sample_path, "final_samples")
 
+        import shutil
+
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
         print()
         print(f"📊 Run ID: {run_id}")
-        print(f"🧠 Generator: {final_model_path}")
-        print(f"🖼️  Samples: {samples_dir}")
+        print(f"📂 Artifacts: mlruns/<experiment_id>/{run_id}/artifacts/")
         print()
         print("To generate data:")
         print(f"   bacterial-gan generate-data --run-id {run_id} --num-images 1000")

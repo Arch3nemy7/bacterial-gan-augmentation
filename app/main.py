@@ -18,7 +18,6 @@ import logging
 from pathlib import Path
 import sys
 
-# Add src to path
 sys.path.append(str(Path(__file__).parent.parent / "src"))
 
 from config import settings
@@ -26,7 +25,6 @@ from app.api.router import api_router
 from app.core.logging_config import setup_api_logging
 from app.core.dependencies import get_model_registry
 
-# Initialize FastAPI app
 app = FastAPI(
     title=settings.app.title,
     version=settings.app.version,
@@ -35,16 +33,14 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
-# Setup CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include API router
 app.include_router(api_router, prefix="/api/v1")
 
 @app.on_event("startup")
@@ -52,20 +48,12 @@ async def startup_event():
     """Initialize services on application startup."""
     setup_api_logging()
     logging.info("Bacterial GAN API starting up...")
-
-    # Initialize model registry
-    # Load available models
-    # Setup monitoring
-
     logging.info("API startup completed")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup resources on application shutdown."""
     logging.info("Bacterial GAN API shutting down...")
-    # Cleanup model instances
-    # Close database connections
-    # Save any pending data
 
 @app.get("/")
 async def root():
@@ -83,8 +71,8 @@ async def health_check():
     return {
         "status": "healthy",
         "version": settings.app.version,
-        "models_available": True,  # Check actual model availability
-        "database_connected": True  # Check database connection
+        "models_available": True,
+        "database_connected": True
     }
 
 if __name__ == "__main__":

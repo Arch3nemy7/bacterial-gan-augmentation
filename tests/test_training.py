@@ -26,13 +26,11 @@ def main():
     print("No real bacterial images are required.")
     print()
 
-    # Load config
     config_path = project_root / "configs" / "config.yaml"
     settings = get_settings(str(config_path))
 
-    # Reduce epochs for testing
     original_epochs = settings.training.epochs
-    settings.training.epochs = 3  # Just 3 epochs for testing
+    settings.training.epochs = 3
 
     print(f"Configuration:")
     print(f"  Image size: {settings.training.image_size}")
@@ -42,7 +40,6 @@ def main():
     print(f"  Loss type: {settings.training.loss_type}")
     print()
 
-    # Skip input prompt if running non-interactively
     try:
         if sys.stdin.isatty():
             input("Press Enter to start training test...")
@@ -52,7 +49,6 @@ def main():
         print("Starting training...")
     print()
 
-    # Run training
     try:
         train_pipeline.run(settings)
         print()

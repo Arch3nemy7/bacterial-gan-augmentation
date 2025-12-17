@@ -108,16 +108,17 @@ def main():
 
     settings = get_settings("configs/config.yaml")
 
-    # Find checkpoint
-    checkpoint_path = Path(f"models/{args.run_id}/checkpoint_epoch_0300.npy")
-    if not checkpoint_path.exists():
-        # Try to find latest checkpoint
-        checkpoints = sorted(Path(f"models/{args.run_id}").glob("checkpoint_*.npy"))
-        if checkpoints:
-            checkpoint_path = checkpoints[-1]
-        else:
-            print(f"❌ No checkpoints found in models/{args.run_id}/")
-            return
+    import glob
+
+    mlruns_pattern = f"mlruns/*/{args.run_id}/artifacts/checkpoints/checkpoint_*.npy"
+    checkpoints = sorted(glob.glob(mlruns_pattern))
+
+    if checkpoints:
+        checkpoint_path = Path(checkpoints[-1])
+    else:
+        print(f"❌ No checkpoints found for run ID: {args.run_id}")
+        print(f"   Searched: {mlruns_pattern}")
+        return
 
     print(f"\nConfiguration:")
     print(f"  Run ID: {args.run_id}")
@@ -135,7 +136,10 @@ def main():
     print(f"   Gram-positive: {np.sum(labels == 0)}")
     print(f"   Gram-negative: {np.sum(labels == 1)}")
 
-    grid_path = Path(f"samples/{args.run_id}/synthetic_grid.png")
+    import tempfile
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="synthetic_"))
+    grid_path = temp_dir / "synthetic_grid.png"
     save_image_grid(images, labels, grid_path)
 
     if args.save_individual:
