@@ -44,3 +44,4 @@ flake8>=6.1.0
 mypy>=1.7.0
 jupyter>=1.0.0
 ipykernel>=6.27.0
+ultralytics>=8.0.0

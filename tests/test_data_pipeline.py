@@ -62,8 +62,8 @@ def main():
     try:
         datasets = create_datasets(
             settings.data,
-            batch_size=4,  # Small batch for testing
-            image_size=(128, 128),  # Using optimized size for GTX 1650
+            batch_size=4,
+            image_size=(128, 128),
         )
 
         for split_name, dataset in datasets.items():
