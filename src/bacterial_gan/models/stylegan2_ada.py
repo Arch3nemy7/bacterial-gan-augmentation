@@ -70,7 +70,7 @@ class ModulatedConv2D(layers.Layer):
         in_channels = feature_shape[-1]
 
         fan_in = in_channels * self.kernel_size * self.kernel_size
-        self.wscale = tf.cast(self.gain / np.sqrt(fan_in), tf.float32)
+        self.wscale = float(self.gain / np.sqrt(fan_in))
 
         self.weight = self.add_weight(
             name="weight",

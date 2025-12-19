@@ -23,8 +23,6 @@ data/05_models/*
 *.npy
 *.h5
 *.keras
-models/
-samples/
 
 # MLflow
 runs/
