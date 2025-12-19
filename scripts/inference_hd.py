@@ -15,10 +15,10 @@ def process_hd_images(model_path, source_dir, output_dir, conf=0.25, crop_size=N
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    crops_dir = output_path / "bacteria_crops"
     vis_dir = output_path / "visualizations"
-    crops_dir.mkdir(exist_ok=True)
     vis_dir.mkdir(exist_ok=True)
+    
+    class_names = model.names
     
     images = list(source_path.glob("*.jpg")) + list(source_path.glob("*.png"))
     print(f"Found {len(images)} HD images. Starting inference...")
@@ -44,6 +44,11 @@ def process_hd_images(model_path, source_dir, output_dir, conf=0.25, crop_size=N
         for i, box in enumerate(result.boxes):
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
             conf_score = float(box.conf)
+            cls_id = int(box.cls)
+            cls_name = class_names[cls_id]
+            
+            class_dir = output_path / cls_name
+            class_dir.mkdir(exist_ok=True)
             
             target_w = x2 - x1
             target_h = y2 - y1
@@ -70,7 +75,7 @@ def process_hd_images(model_path, source_dir, output_dir, conf=0.25, crop_size=N
                 final_crop = square_crop
 
             crop_name = f"{img_file.stem}_crop_{i}_conf{conf_score:.2f}.jpg"
-            cv2.imwrite(str(crops_dir / crop_name), final_crop)
+            cv2.imwrite(str(class_dir / crop_name), final_crop)
             
     print(f"Processing complete. Output saved to {output_dir}")
 

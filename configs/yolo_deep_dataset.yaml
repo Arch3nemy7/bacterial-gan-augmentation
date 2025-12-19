@@ -6,6 +6,7 @@ test: splits_absolute/test.txt
 # Images are in 'images', Labels are in 'labels' parallel to it.
 # YOLO auto-resolves this structure: ../images/file.jpg -> ../labels/file.txt
 
-nc: 1
+nc: 2
 names:
-  0: Bacteria
+  0: gram_negative
+  1: gram_positive
