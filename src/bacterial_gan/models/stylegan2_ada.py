@@ -99,14 +99,21 @@ class ModulatedConv2D(layers.Layer):
             sigma = tf.sqrt(tf.reduce_sum(tf.square(w), axis=[1, 2, 3]) + 1e-8)
             w = w / sigma[:, tf.newaxis, tf.newaxis, tf.newaxis, :]
 
-        x = tf.reshape(x, [1, tf.shape(x)[1], tf.shape(x)[2], batch_size * in_channels])
-        w = tf.transpose(w, [1, 2, 3, 0, 4])
-        w = tf.reshape(
-            w, [self.kernel_size, self.kernel_size, in_channels * batch_size, self.filters]
-        )
+        def conv_step(args):
+            x_i, w_i = args
+            return tf.nn.conv2d(
+                x_i[tf.newaxis, ...],
+                w_i,
+                strides=1,
+                padding="SAME"
+            )[0]
 
-        x = tf.nn.conv2d(x, w, strides=1, padding="SAME")
-        x = tf.reshape(x, [batch_size, tf.shape(x)[1], tf.shape(x)[2], self.filters])
+        x = tf.map_fn(
+            conv_step,
+            (x, w),
+            dtype=tf.float32,
+            fn_output_signature=tf.TensorSpec(shape=(None, None, self.filters), dtype=tf.float32)
+        )
         return x
 
 
