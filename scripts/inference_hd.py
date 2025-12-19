@@ -1,14 +1,13 @@
 from ultralytics import YOLO
 import cv2
-import os
 import argparse
 from pathlib import Path
 from tqdm import tqdm
 
-def process_hd_images(model_path, source_dir, output_dir, conf=0.25, crop_size=None):
+def process_hd_images(model_path, source_dir, output_dir, conf=0.25, crop_size=128):
     """
     Apply trained YOLO model to HD images to detect/crop bacteria.
-    If crop_size is set (e.g. 128), output crops will be 1:1 square resized to that dimension.
+    Crops are always square (1:1 ratio) and resized to crop_size.
     """
     model = YOLO(model_path)
     source_path = Path(source_dir)
@@ -56,7 +55,7 @@ def process_hd_images(model_path, source_dir, output_dir, conf=0.25, crop_size=N
             cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
             max_dim = max(target_w, target_h)
             
-            padding = int(max_dim * 0.1) 
+            padding = int(max_dim * 0.1)
             crop_dim = max_dim + padding
             half_dim = crop_dim // 2
             
@@ -67,12 +66,10 @@ def process_hd_images(model_path, source_dir, output_dir, conf=0.25, crop_size=N
             
             square_crop = img_cv[sy1:sy2, sx1:sx2]
             
-            if square_crop.size == 0: continue
+            if square_crop.size == 0:
+                continue
             
-            if crop_size:
-                final_crop = cv2.resize(square_crop, (crop_size, crop_size), interpolation=cv2.INTER_AREA)
-            else:
-                final_crop = square_crop
+            final_crop = cv2.resize(square_crop, (crop_size, crop_size), interpolation=cv2.INTER_AREA)
 
             crop_name = f"{img_file.stem}_crop_{i}_conf{conf_score:.2f}.jpg"
             cv2.imwrite(str(class_dir / crop_name), final_crop)
