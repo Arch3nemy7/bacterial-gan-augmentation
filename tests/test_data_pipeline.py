@@ -51,7 +51,6 @@ def main():
         image_size=settings.preprocessing.image_size,
         apply_augmentation=settings.preprocessing.apply_augmentation,
         bg_threshold=settings.preprocessing.bg_threshold,
-        use_patch_extraction=settings.preprocessing.use_patch_extraction,
         preprocess_mode=settings.preprocessing.preprocess_mode,
     )
 

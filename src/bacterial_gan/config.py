@@ -29,7 +29,6 @@ class DataConfig(BaseModel):
 class PreprocessingConfig(BaseModel):
     """Preprocessing settings."""
 
-    use_patch_extraction: bool = True
     preprocess_mode: str = "resize"
     image_size: int = 256
     apply_augmentation: bool = True

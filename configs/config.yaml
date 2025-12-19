@@ -28,8 +28,16 @@ data:
 # =============================================================================
 # Run with: poetry run python -m bacterial_gan preprocess
 preprocessing:
-  use_patch_extraction: false   # true = extract patches from large images
-  crop_mode: "resize"           # 'none', 'resize', 'center', 'random'
+  
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ PREPROCESS MODE                                                         │
+  # │   'none'   - Keep original size (no processing)                         │
+  # │   'resize' - Resize entire image to image_size x image_size             │
+  # │   'patch'  - Extract non-overlapping patches, skip background-only      │
+  # │   'center' - Center crop to image_size x image_size                     │
+  # │   'random' - Random crop to image_size x image_size                     │
+  # └─────────────────────────────────────────────────────────────────────────┘
+  preprocess_mode: "resize"
   
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ IMAGE SIZE - Set this to match training.image_size                      │
