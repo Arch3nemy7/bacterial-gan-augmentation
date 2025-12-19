@@ -30,7 +30,7 @@ class PreprocessingConfig(BaseModel):
     """Preprocessing settings."""
 
     use_patch_extraction: bool = True
-    crop_mode: str = "resize"
+    preprocess_mode: str = "resize"
     image_size: int = 256
     apply_augmentation: bool = True
     bg_threshold: float = 0.9

@@ -1,12 +1,9 @@
 """Dataset utilities for bacterial images using TensorFlow."""
 
-import os
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import numpy as np
 import tensorflow as tf
-from PIL import Image
 
 from bacterial_gan.config import DataConfig
 from bacterial_gan.constants import CLASS_LABELS
@@ -18,7 +15,6 @@ class GramStainDataset:
     def __init__(
         self,
         data_path: str,
-        image_size: Tuple[int, int] = (128, 128),
         augment: bool = False,
         split: str = "train",
     ):
@@ -27,12 +23,10 @@ class GramStainDataset:
 
         Args:
             data_path: Path to data directory containing class subdirectories
-            image_size: Target image size (height, width)
             augment: Whether to apply data augmentation
             split: Dataset split ('train', 'val', 'test')
         """
         self.data_path = Path(data_path)
-        self.image_size = image_size
         self.augment = augment
         self.split = split
 
@@ -68,27 +62,19 @@ class GramStainDataset:
         image = tf.io.read_file(image_path)
         image = tf.image.decode_jpeg(image, channels=3)
 
-        image = tf.image.resize(image, self.image_size)
-
         image = (tf.cast(image, tf.float32) - 127.5) / 127.5
 
         return image, label
 
     def _augment_image(self, image: tf.Tensor, label: int):
         """
-        Apply aggressive geometric augmentation for bacterial images.
+        Apply geometric augmentation for bacterial images.
 
         NOTE: Color augmentation is deliberately EXCLUDED because Gram stain colors are
         diagnostic (pink=gram-positive, blue=gram-negative). Changing colors would
         confuse the GAN about correct stain appearance.
-
-        Implements geometric augmentations to maximize dataset diversity:
-        - Geometric: flips, 90° rotations, zoom/crop
-        - Noise: Gaussian noise to simulate imaging artifacts (preserves color)
         """
         if self.augment and self.split == "train":
-            # === GEOMETRIC AUGMENTATIONS ===
-
             image = tf.image.random_flip_left_right(image)
             image = tf.image.random_flip_up_down(image)
 
@@ -110,8 +96,6 @@ class GramStainDataset:
             shift_h = tf.random.uniform([], minval=-max_shift, maxval=max_shift, dtype=tf.int32)
             shift_w = tf.random.uniform([], minval=-max_shift, maxval=max_shift, dtype=tf.int32)
             image = tf.roll(image, shift=[shift_h, shift_w], axis=[0, 1])
-
-            # === NOISE AUGMENTATION ===
 
             noise = tf.random.normal(shape=tf.shape(image), mean=0.0, stddev=0.02, dtype=tf.float32)
             image = image + noise
@@ -201,7 +185,6 @@ class GramStainDataset:
 def create_datasets(
     data_config: DataConfig,
     batch_size: int = 32,
-    image_size: Tuple[int, int] = (128, 128),
 ) -> Dict[str, tf.data.Dataset]:
     """
     Create train, validation, and test datasets.
@@ -209,7 +192,6 @@ def create_datasets(
     Args:
         data_config: Data configuration
         batch_size: Batch size for all datasets
-        image_size: Target image size
 
     Returns:
         Dictionary with 'train', 'val', 'test' datasets
@@ -225,7 +207,6 @@ def create_datasets(
 
         dataset = GramStainDataset(
             data_path=str(split_path),
-            image_size=image_size,
             augment=(split == 'train'),
             split=split,
         )

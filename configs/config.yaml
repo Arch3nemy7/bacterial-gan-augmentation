@@ -10,11 +10,11 @@ data:
 
 preprocessing:
   use_patch_extraction: false
-  crop_mode: "resize"  # 'none', 'resize', 'center', or 'random' (when patch extraction disabled)
+  preprocess_mode: "none"  # 'none', 'resize', 'center', or 'random' (when patch extraction disabled)
   image_size: 128
-  apply_augmentation: true
+  apply_augmentation: false
   bg_threshold: 0.9
-  max_patches_per_split: 5000
+  max_patches_per_split: null
 
   train_ratio: 0.7
   val_ratio: 0.15
@@ -61,7 +61,7 @@ training:
     cpu_threads: null
     enable_xla: false
     dataset_prefetch_buffer: -1
-    dataset_cache_in_memory: true
+    dataset_cache_in_memory: false
     dataset_cache_filename: null
 
   # Checkpointing

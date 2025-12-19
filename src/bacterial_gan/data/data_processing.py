@@ -26,21 +26,21 @@ def is_background_patch(patch: np.ndarray, threshold: float = 0.9, bg_value: int
 
 def extract_patches_from_image(
     img: np.ndarray,
-    patch_size: int = 128,
+    image_size: int = 128,
     stride: int = None,
     filter_background: bool = True,
     bg_threshold: float = 0.9,
 ) -> List[np.ndarray]:
     """Extract non-overlapping patches from an image."""
     if stride is None:
-        stride = patch_size
+        stride = image_size
 
     height, width = img.shape[:2]
     patches = []
 
-    for y in range(0, height - patch_size + 1, stride):
-        for x in range(0, width - patch_size + 1, stride):
-            patch = img[y : y + patch_size, x : x + patch_size]
+    for y in range(0, height - image_size + 1, stride):
+        for x in range(0, width - image_size + 1, stride):
+            patch = img[y : y + image_size, x : x + image_size]
 
             if filter_background:
                 if not is_background_patch(patch, threshold=bg_threshold):
@@ -71,11 +71,11 @@ def create_data_splits(
     val_ratio: float = 0.15,
     test_ratio: float = 0.15,
     random_seed: int = 42,
-    patch_size: int = 128,
+    image_size: int = 128,
     apply_augmentation: bool = True,
     bg_threshold: float = 0.9,
     use_patch_extraction: bool = True,
-    crop_mode: str = "resize",
+    preprocess_mode: str = "resize",
     max_patches_per_split: int | None = None,
 ) -> None:
     """Split raw data into train/val/test sets with patch extraction."""
@@ -101,9 +101,9 @@ def create_data_splits(
             "center": "Center Crop",
             "random": "Random Crop",
         }
-        print(f"  Mode: {mode_names.get(crop_mode, crop_mode)}")
-    if crop_mode != "none" or use_patch_extraction:
-        print(f"  Target size: {patch_size}x{patch_size}")
+        print(f"  Mode: {mode_names.get(preprocess_mode, preprocess_mode)}")
+    if preprocess_mode != "none" or use_patch_extraction:
+        print(f"  Target size: {image_size}x{image_size}")
     print(f"  Augmentation: {'8x' if apply_augmentation else 'Disabled'}")
     if max_patches_per_split:
         print(f"  Max patches per split: {max_patches_per_split}")
@@ -169,43 +169,43 @@ def create_data_splits(
                     if use_patch_extraction:
                         patches = extract_patches_from_image(
                             img_array,
-                            patch_size=patch_size,
+                            image_size=image_size,
                             filter_background=True,
                             bg_threshold=bg_threshold,
                         )
                     else:
                         h, w = img_array.shape[:2]
 
-                        if crop_mode == "none":
+                        if preprocess_mode == "none":
                             patches = [img_array]
 
-                        elif crop_mode == "resize":
+                        elif preprocess_mode == "resize":
                             img_resized = Image.fromarray(img_array).resize(
-                                (patch_size, patch_size), Image.Resampling.LANCZOS
+                                (image_size, image_size), Image.Resampling.LANCZOS
                             )
                             patches = [np.array(img_resized)]
 
-                        elif crop_mode == "center":
-                            if h >= patch_size and w >= patch_size:
-                                y = (h - patch_size) // 2
-                                x = (w - patch_size) // 2
-                                patches = [img_array[y : y + patch_size, x : x + patch_size]]
+                        elif preprocess_mode == "center":
+                            if h >= image_size and w >= image_size:
+                                y = (h - image_size) // 2
+                                x = (w - image_size) // 2
+                                patches = [img_array[y : y + image_size, x : x + image_size]]
                             else:
                                 img_resized = Image.fromarray(img_array).resize(
-                                    (patch_size, patch_size), Image.Resampling.LANCZOS
+                                    (image_size, image_size), Image.Resampling.LANCZOS
                                 )
                                 patches = [np.array(img_resized)]
 
                         else:
-                            if h >= patch_size and w >= patch_size:
+                            if h >= image_size and w >= image_size:
                                 local_seed = int(src_file.stat().st_size + idx) % (2**32)
                                 rng = np.random.RandomState(local_seed)
-                                y = rng.randint(0, h - patch_size + 1)
-                                x = rng.randint(0, w - patch_size + 1)
-                                patches = [img_array[y : y + patch_size, x : x + patch_size]]
+                                y = rng.randint(0, h - image_size + 1)
+                                x = rng.randint(0, w - image_size + 1)
+                                patches = [img_array[y : y + image_size, x : x + image_size]]
                             else:
                                 img_resized = Image.fromarray(img_array).resize(
-                                    (patch_size, patch_size), Image.Resampling.LANCZOS
+                                    (image_size, image_size), Image.Resampling.LANCZOS
                                 )
                                 patches = [np.array(img_resized)]
 

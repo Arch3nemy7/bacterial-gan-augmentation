@@ -166,7 +166,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             try:
                 dataset = GramStainDataset(
                     data_path=str(processed_data_path),
-                    image_size=(settings.training.image_size, settings.training.image_size),
                     augment=True,
                     split="train",
                 )

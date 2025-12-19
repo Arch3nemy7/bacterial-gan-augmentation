@@ -154,7 +154,7 @@ def main():
     if settings.preprocessing.use_patch_extraction:
         print("  Mode: Patch Extraction")
     else:
-        print(f"  Mode: {settings.preprocessing.crop_mode.title()}")
+        print(f"  Mode: {settings.preprocessing.preprocess_mode.title()}")
     print(f"  Size: {settings.preprocessing.image_size}x{settings.preprocessing.image_size}")
     print(f"  Augmentation: {'8x' if settings.preprocessing.apply_augmentation else 'Off'}")
 
@@ -186,11 +186,11 @@ def main():
             val_ratio=val_ratio,
             test_ratio=test_ratio,
             random_seed=settings.preprocessing.random_seed,
-            patch_size=settings.preprocessing.image_size,
+            image_size=settings.preprocessing.image_size,
             apply_augmentation=settings.preprocessing.apply_augmentation,
             bg_threshold=settings.preprocessing.bg_threshold,
             use_patch_extraction=settings.preprocessing.use_patch_extraction,
-            crop_mode=settings.preprocessing.crop_mode,
+            preprocess_mode=settings.preprocessing.preprocess_mode,
             max_patches_per_split=settings.preprocessing.max_patches_per_split,
         )
 

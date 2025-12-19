@@ -48,11 +48,11 @@ def main():
         val_ratio=settings.preprocessing.val_ratio,
         test_ratio=settings.preprocessing.test_ratio,
         random_seed=settings.preprocessing.random_seed,
-        patch_size=settings.preprocessing.image_size,
+        image_size=settings.preprocessing.image_size,
         apply_augmentation=settings.preprocessing.apply_augmentation,
         bg_threshold=settings.preprocessing.bg_threshold,
         use_patch_extraction=settings.preprocessing.use_patch_extraction,
-        crop_mode=settings.preprocessing.crop_mode,
+        preprocess_mode=settings.preprocessing.preprocess_mode,
     )
 
     print("\n" + "-" * 80)
@@ -63,7 +63,6 @@ def main():
         datasets = create_datasets(
             settings.data,
             batch_size=4,
-            image_size=(128, 128),
         )
 
         for split_name, dataset in datasets.items():
