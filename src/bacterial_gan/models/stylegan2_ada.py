@@ -295,17 +295,30 @@ class SynthesisNetwork(keras.Model):
         rgb = self.first_to_rgb([x, w_all[0]])
 
         layer_idx = 1
-        for i, (block, to_rgb) in enumerate(zip(self.blocks, self.to_rgbs)):
+        for i, to_rgb in enumerate(self.to_rgbs):
+            # Block 1 (Upsample)
+            block1 = self.blocks[i * 2]
             noise = (
-                noise_inputs[layer_idx] if noise_inputs and layer_idx < len(noise_inputs) else None
+                noise_inputs[layer_idx]
+                if noise_inputs and layer_idx < len(noise_inputs)
+                else None
             )
-            x = block([x, w_all[min(layer_idx, len(w_all) - 1)]], noise=noise)
-
-            if i % 2 == 1:
-                rgb = tf.image.resize(rgb, [tf.shape(x)[1], tf.shape(x)[2]], method="bilinear")
-                rgb = rgb + to_rgb([x, w_all[min(layer_idx, len(w_all) - 1)]])
-
+            x = block1([x, w_all[min(layer_idx, len(w_all) - 1)]], noise=noise)
             layer_idx += 1
+
+            # Block 2 (Conv)
+            block2 = self.blocks[i * 2 + 1]
+            noise = (
+                noise_inputs[layer_idx]
+                if noise_inputs and layer_idx < len(noise_inputs)
+                else None
+            )
+            x = block2([x, w_all[min(layer_idx, len(w_all) - 1)]], noise=noise)
+            layer_idx += 1
+
+            # RGB Update
+            rgb = tf.image.resize(rgb, [tf.shape(x)[1], tf.shape(x)[2]], method="bilinear")
+            rgb = rgb + to_rgb([x, w_all[min(layer_idx - 1, len(w_all) - 1)]])
 
         return rgb
 
