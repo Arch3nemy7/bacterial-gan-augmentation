@@ -67,11 +67,11 @@ training:
   
   # IMAGE SIZE - Must match preprocessing.image_size!
   # ┌──────────┬────────────┬─────────────┬──────────────────────────────┐
-  # │ Size     │ VRAM       │ Batch Size  │ Recommended GPU              │
+  # │ Size     │ VRAM/GPU   │ Batch Size  │ Recommended GPU              │
   # ├──────────┼────────────┼─────────────┼──────────────────────────────┤
   # │ 128      │ ~3-4 GB    │ 16-32       │ GTX 1650                     │
-  # │ 256      │ ~6-8 GB    │ 8-16        │ RTX 3060                     │
-  # │ 256      │ ~10-12 GB  │ 8-12        │ 2x RTX 4070S (multi-GPU)     │
+  # │ 256      │ ~6-8 GB    │ 4-8         │ RTX 3060 (8GB)               │
+  # │ 256      │ ~8-10 GB   │ 4 (eff. 8)  │ 2x RTX 4070S (multi-GPU)     │
   # │ 512      │ ~12-16 GB  │ 4-8         │ RTX 3090 / A100              │
   # └──────────┴────────────┴─────────────┴──────────────────────────────┘
   #
@@ -93,7 +93,8 @@ training:
   # Batch size recommendations:
   #   - 128x128 on GTX 1650: batch_size=16
   #   - 256x256 on RTX 3060: batch_size=8
-  batch_size: 8
+  #   - 256x256 on 2x RTX 4070S: batch_size=4 (effective=8 with multi-GPU)
+  batch_size: 4
   epochs: 300
   
   # Learning rates (default StyleGAN2 values work well)
@@ -153,9 +154,8 @@ training:
     dataset_prefetch_buffer: -1 # -1 = auto
     dataset_cache_in_memory: false
     dataset_cache_filename: null
-    # Multi-GPU: Currently disabled due to TF/Keras compatibility issues
-    # The main memory saving comes from mixed_precision above
-    use_multi_gpu: false        # Set to false for now
+    # Multi-GPU: Distributes model across all GPUs for more memory
+    use_multi_gpu: true         # Enable for 2x RTX 4070S
     # Gradient checkpointing: Trade compute for memory (slower but less VRAM)
     gradient_checkpointing: false
 
