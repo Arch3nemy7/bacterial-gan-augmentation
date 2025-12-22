@@ -76,12 +76,11 @@ training:
   # └──────────┴────────────┴─────────────┴──────────────────────────────┘
   #
   # OOM TROUBLESHOOTING (try in order):
-  #   1. Enable mixed precision: use_mixed_precision: true
-  #   2. Enable multi-GPU: memory_optimization.use_multi_gpu: true
-  #   3. Reduce batch_size (e.g., 8 -> 4)
+  #   1. Enable mixed precision: use_mixed_precision: true (~50% less VRAM)
+  #   2. Reduce batch_size (e.g., 8 -> 4)
+  #   3. Disable EMA: use_ema: false (saves ~100MB)
   #   4. Use simplified architecture: use_simplified: true
-  #   5. Disable EMA: use_ema: false
-  #   6. Reduce image_size (256 -> 128)
+  #   5. Reduce image_size (256 -> 128)
   image_size: 256
   
   num_classes: 2                # 2 = gram_positive, gram_negative
@@ -154,8 +153,9 @@ training:
     dataset_prefetch_buffer: -1 # -1 = auto
     dataset_cache_in_memory: false
     dataset_cache_filename: null
-    # Multi-GPU: Auto-detect and distribute across multiple GPUs
-    use_multi_gpu: true         # Enables MirroredStrategy for 2+ GPUs
+    # Multi-GPU: Currently disabled due to TF/Keras compatibility issues
+    # The main memory saving comes from mixed_precision above
+    use_multi_gpu: false        # Set to false for now
     # Gradient checkpointing: Trade compute for memory (slower but less VRAM)
     gradient_checkpointing: false
 

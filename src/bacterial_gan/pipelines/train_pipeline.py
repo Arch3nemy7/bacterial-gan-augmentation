@@ -164,15 +164,8 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         print("📂 Loading dataset...")
         processed_data_path = Path(settings.data.processed_data_dir) / "train"
 
-        # Calculate per-replica batch size for multi-GPU
-        global_batch_size = settings.training.batch_size
-        per_replica_batch_size = global_batch_size // gan.num_replicas
-        if per_replica_batch_size < 1:
-            per_replica_batch_size = 1
-            global_batch_size = gan.num_replicas
-
-        if gan.num_replicas > 1:
-            print(f"   Multi-GPU: global_batch={global_batch_size}, per_replica={per_replica_batch_size}")
+        # Use the configured batch size (MirroredStrategy handles distribution automatically)
+        batch_size = settings.training.batch_size
 
         train_dataset = None
         num_batches = None
@@ -184,9 +177,9 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                     split="train",
                 )
                 train_dataset = dataset.get_tf_dataset(
-                    batch_size=global_batch_size, shuffle=True
+                    batch_size=batch_size, shuffle=True
                 )
-                num_batches = dataset.num_samples // global_batch_size
+                num_batches = dataset.num_samples // batch_size
                 print(f"✅ Loaded {dataset.num_samples} images")
             except (ValueError, FileNotFoundError) as e:
                 print(f"⚠️  Could not load dataset: {e}")
@@ -194,15 +187,10 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         if train_dataset is None:
             print("⚠️  No dataset found, using dummy data for testing...")
             train_dataset = create_dummy_dataset(
-                batch_size=global_batch_size,
+                batch_size=batch_size,
                 image_size=settings.training.image_size,
             )
             num_batches = settings.training.dummy_num_batches
-
-        # Distribute dataset across GPUs if using multi-GPU
-        if gan.num_replicas > 1:
-            train_dataset = gan.strategy.experimental_distribute_dataset(train_dataset)
-            print(f"   Dataset distributed across {gan.num_replicas} GPUs")
 
         print()
 
