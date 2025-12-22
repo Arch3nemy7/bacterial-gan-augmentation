@@ -51,6 +51,8 @@ class MemoryOptimizationConfig(BaseModel):
     dataset_prefetch_buffer: int = -1
     dataset_cache_in_memory: bool = False
     dataset_cache_filename: str | None = None
+    use_multi_gpu: bool = True  # Auto-detect and use multiple GPUs
+    gradient_checkpointing: bool = False  # Trade compute for memory
 
 
 class TrainingConfig(BaseModel):

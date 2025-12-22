@@ -66,13 +66,22 @@ training:
   use_simplified: false          # true = works on 4GB VRAM, false = needs 8GB+
   
   # IMAGE SIZE - Must match preprocessing.image_size!
-  # ┌──────────┬────────────┬─────────────┬──────────────────┐
-  # │ Size     │ VRAM       │ Batch Size  │ Recommended GPU  │
-  # ├──────────┼────────────┼─────────────┼──────────────────┤
-  # │ 128      │ ~3-4 GB    │ 16-32       │ GTX 1650         │
-  # │ 256      │ ~6-8 GB    │ 8-16        │ RTX 3060         │
-  # │ 512      │ ~12-16 GB  │ 4-8         │ RTX 3090 / A100  │
-  # └──────────┴────────────┴─────────────┴──────────────────┘
+  # ┌──────────┬────────────┬─────────────┬──────────────────────────────┐
+  # │ Size     │ VRAM       │ Batch Size  │ Recommended GPU              │
+  # ├──────────┼────────────┼─────────────┼──────────────────────────────┤
+  # │ 128      │ ~3-4 GB    │ 16-32       │ GTX 1650                     │
+  # │ 256      │ ~6-8 GB    │ 8-16        │ RTX 3060                     │
+  # │ 256      │ ~10-12 GB  │ 8-12        │ 2x RTX 4070S (multi-GPU)     │
+  # │ 512      │ ~12-16 GB  │ 4-8         │ RTX 3090 / A100              │
+  # └──────────┴────────────┴─────────────┴──────────────────────────────┘
+  #
+  # OOM TROUBLESHOOTING (try in order):
+  #   1. Enable mixed precision: use_mixed_precision: true
+  #   2. Enable multi-GPU: memory_optimization.use_multi_gpu: true
+  #   3. Reduce batch_size (e.g., 8 -> 4)
+  #   4. Use simplified architecture: use_simplified: true
+  #   5. Disable EMA: use_ema: false
+  #   6. Reduce image_size (256 -> 128)
   image_size: 256
   
   num_classes: 2                # 2 = gram_positive, gram_negative
@@ -134,8 +143,9 @@ training:
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ PERFORMANCE & MEMORY                                                    │
   # └─────────────────────────────────────────────────────────────────────────┘
-  use_mixed_precision: false    # true = faster on RTX cards, may be unstable
-  
+  # Mixed precision: Uses FP16 for faster training and ~50% less memory
+  use_mixed_precision: true     # HIGHLY RECOMMENDED for RTX cards
+
   memory_optimization:
     gpu_memory_growth: true     # true = allocate only what's needed
     gpu_memory_limit_mb: null   # null = use all available, or set limit (e.g., 3500)
@@ -144,6 +154,10 @@ training:
     dataset_prefetch_buffer: -1 # -1 = auto
     dataset_cache_in_memory: false
     dataset_cache_filename: null
+    # Multi-GPU: Auto-detect and distribute across multiple GPUs
+    use_multi_gpu: true         # Enables MirroredStrategy for 2+ GPUs
+    # Gradient checkpointing: Trade compute for memory (slower but less VRAM)
+    gradient_checkpointing: false
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ CHECKPOINTING & SAMPLING                                                │

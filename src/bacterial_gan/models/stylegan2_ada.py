@@ -145,7 +145,12 @@ class LearnedConstant(layers.Layer):
         super().build(input_shape)
 
     def call(self, batch_size: int) -> tf.Tensor:
-        return tf.tile(self.const, [batch_size, 1, 1, 1])
+        # Tile const and let TensorFlow handle dtype via compute_dtype
+        const = self.const
+        # For mixed precision, cast to compute dtype
+        if hasattr(self, '_compute_dtype') and self._compute_dtype:
+            const = tf.cast(const, self._compute_dtype)
+        return tf.tile(const, [batch_size, 1, 1, 1])
 
 
 class ModulatedConv2D(layers.Layer):
@@ -251,8 +256,14 @@ class NoiseInjection(layers.Layer):
 
     def call(self, x: tf.Tensor, noise: Optional[tf.Tensor] = None) -> tf.Tensor:
         if noise is None:
-            noise = tf.random.normal([tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], 1])
-        return x + self.noise_strength * noise
+            # Generate noise with same dtype as input for mixed precision compatibility
+            noise = tf.random.normal([tf.shape(x)[0], tf.shape(x)[1], tf.shape(x)[2], 1], dtype=x.dtype)
+        else:
+            # Cast provided noise to match input dtype
+            noise = tf.cast(noise, x.dtype)
+        # Cast noise_strength to input dtype for mixed precision
+        noise_strength = tf.cast(self.noise_strength, x.dtype)
+        return x + noise_strength * noise
 
 
 class StyleBlock(layers.Layer):
@@ -280,7 +291,8 @@ class StyleBlock(layers.Layer):
             x = tf.image.resize(x, [tf.shape(x)[1] * 2, tf.shape(x)[2] * 2], method="bilinear")
         x = self.mod_conv([x, style])
         x = self.noise(x, noise)
-        x = x + self.bias
+        # Cast bias to match input dtype for mixed precision compatibility
+        x = x + tf.cast(self.bias, x.dtype)
         x = tf.nn.leaky_relu(x, alpha=0.2)
         return x
 
@@ -298,7 +310,8 @@ class ToRGB(layers.Layer):
     def call(self, inputs: List[tf.Tensor]) -> tf.Tensor:
         x, style = inputs
         x = self.mod_conv([x, style])
-        return x + self.bias
+        # Cast bias to match input dtype for mixed precision compatibility
+        return x + tf.cast(self.bias, x.dtype)
 
 
 class MappingNetwork(keras.Model):
@@ -350,7 +363,8 @@ class MappingNetwork(keras.Model):
             if len(class_labels.shape) == 2:
                 class_labels = tf.squeeze(class_labels, axis=-1)
             class_embed = self.class_embedding(class_labels)
-            class_embed = class_embed / tf.sqrt(tf.cast(self.label_dim, tf.float32))
+            # Cast divisor to match dtype for mixed precision compatibility
+            class_embed = class_embed / tf.sqrt(tf.cast(self.label_dim, class_embed.dtype))
             w = tf.concat([w, class_embed], axis=-1)
 
         for i, layer in enumerate(self.mapping_layers):
@@ -436,9 +450,10 @@ class SynthesisNetwork(keras.Model):
             x = block2([x, w_all[min(layer_idx, len(w_all) - 1)]], noise=noise)
             layer_idx += 1
 
-            # RGB Update
+            # RGB Update (cast for mixed precision compatibility)
             rgb = tf.image.resize(rgb, [tf.shape(x)[1], tf.shape(x)[2]], method="bilinear")
-            rgb = rgb + to_rgb([x, w_all[min(layer_idx - 1, len(w_all) - 1)]])
+            new_rgb = to_rgb([x, w_all[min(layer_idx - 1, len(w_all) - 1)]])
+            rgb = tf.cast(rgb, new_rgb.dtype) + new_rgb
 
         return rgb
 
@@ -491,8 +506,9 @@ class StyleGAN2Generator(keras.Model):
         )
 
     def _update_w_avg(self, w: tf.Tensor):
-        """Update running average of w vectors."""
-        batch_avg = tf.reduce_mean(w, axis=0)
+        """Update running average of w vectors (in float32 for stability)."""
+        # Cast to float32 for stable accumulation (avoid float16 precision issues)
+        batch_avg = tf.cast(tf.reduce_mean(w, axis=0), tf.float32)
         self.w_avg.assign(
             self.w_avg_beta * self.w_avg + (1.0 - self.w_avg_beta) * batch_avg
         )
@@ -539,13 +555,13 @@ class StyleGAN2Generator(keras.Model):
                 w_broadcast = tf.tile(w[:, tf.newaxis, :], [1, self.num_ws, 1])
                 w2_broadcast = tf.tile(w2[:, tf.newaxis, :], [1, self.num_ws, 1])
 
-                # Create mixing mask
+                # Create mixing mask (use same dtype as w for mixed precision compatibility)
                 layer_idx = tf.range(self.num_ws)
-                mask = tf.cast(layer_idx < crossover, tf.float32)
+                mask = tf.cast(layer_idx < crossover, w.dtype)
                 mask = mask[tf.newaxis, :, tf.newaxis]  # [1, num_ws, 1]
 
                 # Mix w and w2
-                w_mixed = w_broadcast * mask + w2_broadcast * (1.0 - mask)
+                w_mixed = w_broadcast * mask + w2_broadcast * (tf.constant(1.0, dtype=w.dtype) - mask)
                 return w_mixed
 
             def no_mixing():
@@ -596,13 +612,13 @@ class StyleGAN2Generator(keras.Model):
                 # Apply to all layers
                 w_truncated = w_avg_broadcast + truncation_psi * (w_broadcast - w_avg_broadcast)
             else:
-                # Apply only to first truncation_cutoff layers
+                # Apply only to first truncation_cutoff layers (mixed precision compatible)
                 layer_idx = tf.range(self.num_ws)
-                mask = tf.cast(layer_idx < truncation_cutoff, tf.float32)
+                mask = tf.cast(layer_idx < truncation_cutoff, w_broadcast.dtype)
                 mask = mask[tf.newaxis, :, tf.newaxis]
 
                 w_truncated_part = w_avg_broadcast + truncation_psi * (w_broadcast - w_avg_broadcast)
-                w_truncated = w_truncated_part * mask + w_broadcast * (1.0 - mask)
+                w_truncated = w_truncated_part * mask + w_broadcast * (tf.constant(1.0, dtype=w_broadcast.dtype) - mask)
 
             w_broadcast = w_truncated
 
@@ -753,13 +769,15 @@ class AdaptiveAugmentation(layers.Layer):
         self.p.assign(new_p)
 
     def _apply_blitting(self, images: tf.Tensor, batch_size: int) -> tf.Tensor:
-        """Apply brightness and contrast adjustments."""
+        """Apply brightness and contrast adjustments (mixed precision compatible)."""
+        dtype = images.dtype
+
         # Brightness
-        brightness = tf.random.uniform([batch_size, 1, 1, 1], -0.2, 0.2)
+        brightness = tf.cast(tf.random.uniform([batch_size, 1, 1, 1], -0.2, 0.2), dtype)
         images = images + brightness
 
         # Contrast
-        contrast = tf.random.uniform([batch_size, 1, 1, 1], 0.8, 1.2)
+        contrast = tf.cast(tf.random.uniform([batch_size, 1, 1, 1], 0.8, 1.2), dtype)
         mean = tf.reduce_mean(images, axis=[1, 2], keepdims=True)
         images = mean + contrast * (images - mean)
 
@@ -814,18 +832,20 @@ class AdaptiveAugmentation(layers.Layer):
         return images
 
     def _apply_color(self, images: tf.Tensor, batch_size: int) -> tf.Tensor:
-        """Apply saturation and hue adjustments."""
+        """Apply saturation and hue adjustments (mixed precision compatible)."""
+        dtype = images.dtype
+
         # Saturation
         gray = tf.reduce_mean(images, axis=-1, keepdims=True)
-        sat = tf.random.uniform([batch_size, 1, 1, 1], 0.8, 1.2)
+        sat = tf.cast(tf.random.uniform([batch_size, 1, 1, 1], 0.8, 1.2), dtype)
         images = gray + sat * (images - gray)
 
         # Hue rotation (simplified - rotate color channels)
         def apply_hue():
             # Slight hue shift using channel mixing
             hue_angle = tf.random.uniform([], -0.1, 0.1) * np.pi
-            cos_h = tf.cos(hue_angle)
-            sin_h = tf.sin(hue_angle)
+            cos_h = tf.cast(tf.cos(hue_angle), dtype)
+            sin_h = tf.cast(tf.sin(hue_angle), dtype)
 
             # Apply hue rotation matrix (simplified)
             r, g, b = images[..., 0:1], images[..., 1:2], images[..., 2:3]
@@ -840,15 +860,16 @@ class AdaptiveAugmentation(layers.Layer):
         return images
 
     def _apply_filtering(self, images: tf.Tensor, batch_size: int) -> tf.Tensor:
-        """Apply Gaussian blur filtering."""
+        """Apply Gaussian blur filtering (mixed precision compatible)."""
+        dtype = images.dtype
         # Probabilistic blur (50% chance)
         do_blur = tf.random.uniform([]) < 0.5
 
         def apply_blur():
-            # Simple 3x3 Gaussian kernel
+            # Simple 3x3 Gaussian kernel - cast to images dtype
             kernel = tf.constant(
-                [[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=tf.float32
-            ) / 16.0
+                [[1, 2, 1], [2, 4, 2], [1, 2, 1]], dtype=dtype
+            ) / tf.constant(16.0, dtype=dtype)
             kernel = tf.reshape(kernel, [3, 3, 1, 1])
             kernel = tf.tile(kernel, [1, 1, 3, 1])  # For each channel
 
@@ -861,9 +882,12 @@ class AdaptiveAugmentation(layers.Layer):
         return tf.cond(do_blur, apply_blur, lambda: images)
 
     def _apply_noise(self, images: tf.Tensor, batch_size: int) -> tf.Tensor:
-        """Add random noise to images."""
+        """Add random noise to images (mixed precision compatible)."""
+        # Generate noise in float32 (TF random doesn't support float16 stddev)
         noise_std = tf.random.uniform([], 0.0, 0.05)
-        noise = tf.random.normal(tf.shape(images), stddev=noise_std)
+        noise = tf.random.normal(tf.shape(images), stddev=noise_std, dtype=tf.float32)
+        # Cast to images dtype
+        noise = tf.cast(noise, images.dtype)
         return images + noise
 
     def _apply_cutout(self, images: tf.Tensor, batch_size: int) -> tf.Tensor:
@@ -901,14 +925,14 @@ class AdaptiveAugmentation(layers.Layer):
             x_range < x_center + cutout_w // 2,
         )  # [W]
 
-        # Combine into 2D mask [H, W, 1]
+        # Combine into 2D mask [H, W, 1] - cast to images dtype for mixed precision
         mask = tf.cast(
             tf.logical_and(y_mask[:, tf.newaxis], x_mask[tf.newaxis, :]),
-            tf.float32,
+            images.dtype,
         )[:, :, tf.newaxis]
 
         # Apply cutout (set masked region to 0)
-        images = images * (1.0 - mask)
+        images = images * (tf.constant(1.0, dtype=images.dtype) - mask)
 
         return images
 

@@ -7,6 +7,7 @@ Provides high-level training loop with:
 - EMA (Exponential Moving Average) generator for stable inference
 - Mixed precision training with gradient scaling
 - Truncation trick for controlled generation
+- Multi-GPU support with MirroredStrategy
 """
 
 from pathlib import Path
@@ -18,6 +19,14 @@ from tensorflow import keras
 
 from .losses import StyleGAN2ADALoss, get_loss_functions, path_length_regularization, r1_regularization
 from .stylegan2_ada import ExponentialMovingAverage, build_stylegan2_ada
+
+
+def get_strategy() -> tf.distribute.Strategy:
+    """Get distribution strategy for multi-GPU training."""
+    gpus = tf.config.list_physical_devices('GPU')
+    if len(gpus) > 1:
+        return tf.distribute.MirroredStrategy()
+    return tf.distribute.get_strategy()
 
 
 class StyleGAN2ADA:
@@ -57,6 +66,7 @@ class StyleGAN2ADA:
         ema_decay: float = 0.999,
         use_ema: bool = True,
         use_pl_reg: bool = True,
+        use_multi_gpu: bool = True,
     ):
         self.latent_dim = latent_dim
         self.num_classes = num_classes
@@ -75,68 +85,76 @@ class StyleGAN2ADA:
         self.ema_decay = ema_decay
         self.use_pl_reg = use_pl_reg
         self.use_mixed_precision = use_mixed_precision
+        self.use_multi_gpu = use_multi_gpu
+
+        # Get distribution strategy for multi-GPU
+        if use_multi_gpu:
+            self.strategy = get_strategy()
+            num_replicas = self.strategy.num_replicas_in_sync
+            if num_replicas > 1:
+                print(f"✅ Multi-GPU enabled: {num_replicas} GPUs")
+        else:
+            self.strategy = tf.distribute.get_strategy()
+            num_replicas = 1
+
+        self.num_replicas = num_replicas
 
         if use_mixed_precision:
             keras.mixed_precision.set_global_policy("mixed_float16")
-            print("✅ Mixed precision enabled")
+            print("✅ Mixed precision enabled (FP16)")
 
         print("🏗️  Building StyleGAN2-ADA...")
-        models = build_stylegan2_ada(
-            latent_dim=latent_dim,
-            num_classes=num_classes,
-            image_size=image_size,
-            channels=channels,
-            use_simplified=use_simplified,
-            use_ada=use_ada,
-            ada_target=ada_target,
-        )
 
-        self.generator = models["generator"]
-        self.discriminator = models["discriminator"]
+        # Build models and optimizers within strategy scope
+        with self.strategy.scope():
+            models = build_stylegan2_ada(
+                latent_dim=latent_dim,
+                num_classes=num_classes,
+                image_size=image_size,
+                channels=channels,
+                use_simplified=use_simplified,
+                use_ada=use_ada,
+                ada_target=ada_target,
+            )
 
-        self.loss_module = StyleGAN2ADALoss(
-            r1_gamma=r1_gamma,
-            pl_weight=pl_weight,
-            pl_interval=pl_interval,
-            r1_interval=r1_interval,
-        )
+            self.generator = models["generator"]
+            self.discriminator = models["discriminator"]
 
-        self.gen_loss_fn, self.disc_loss_fn = get_loss_functions(loss_type)
+            self.loss_module = StyleGAN2ADALoss(
+                r1_gamma=r1_gamma,
+                pl_weight=pl_weight,
+                pl_interval=pl_interval,
+                r1_interval=r1_interval,
+            )
 
-        # Base optimizers
-        gen_opt = keras.optimizers.Adam(
-            learning_rate=learning_rate_g, beta_1=beta1, beta_2=beta2
-        )
-        disc_opt = keras.optimizers.Adam(
-            learning_rate=learning_rate_d, beta_1=beta1, beta_2=beta2
-        )
+            self.gen_loss_fn, self.disc_loss_fn = get_loss_functions(loss_type)
 
-        # Wrap with LossScaleOptimizer for mixed precision
-        if use_mixed_precision:
-            self.gen_optimizer = keras.mixed_precision.LossScaleOptimizer(gen_opt)
-            self.disc_optimizer = keras.mixed_precision.LossScaleOptimizer(disc_opt)
-        else:
-            self.gen_optimizer = gen_opt
-            self.disc_optimizer = disc_opt
+            # Optimizers (Keras 3 handles mixed precision automatically with policy)
+            self.gen_optimizer = keras.optimizers.Adam(
+                learning_rate=learning_rate_g, beta_1=beta1, beta_2=beta2
+            )
+            self.disc_optimizer = keras.optimizers.Adam(
+                learning_rate=learning_rate_d, beta_1=beta1, beta_2=beta2
+            )
 
-        # Metrics
-        self.gen_loss_metric = keras.metrics.Mean(name="generator_loss")
-        self.disc_loss_metric = keras.metrics.Mean(name="discriminator_loss")
-        self.r1_metric = keras.metrics.Mean(name="r1_penalty")
-        self.pl_metric = keras.metrics.Mean(name="pl_penalty")
-        self.ada_p_metric = keras.metrics.Mean(name="ada_p")
+            # Metrics
+            self.gen_loss_metric = keras.metrics.Mean(name="generator_loss")
+            self.disc_loss_metric = keras.metrics.Mean(name="discriminator_loss")
+            self.r1_metric = keras.metrics.Mean(name="r1_penalty")
+            self.pl_metric = keras.metrics.Mean(name="pl_penalty")
+            self.ada_p_metric = keras.metrics.Mean(name="ada_p")
 
-        self.iteration = tf.Variable(0, trainable=False, dtype=tf.int64)
+            self.iteration = tf.Variable(0, trainable=False, dtype=tf.int64)
 
-        # Path length moving average
-        self.pl_mean = tf.Variable(0.0, trainable=False, dtype=tf.float32)
+            # Path length moving average
+            self.pl_mean = tf.Variable(0.0, trainable=False, dtype=tf.float32)
 
-        self._build_models()
+            self._build_models()
 
-        # EMA generator for stable inference
-        if use_ema:
-            self.generator_ema = ExponentialMovingAverage(self.generator, decay=ema_decay)
-            print(f"✅ EMA enabled (decay={ema_decay})")
+            # EMA generator for stable inference
+            if use_ema:
+                self.generator_ema = ExponentialMovingAverage(self.generator, decay=ema_decay)
+                print(f"✅ EMA enabled (decay={ema_decay})")
 
         print("✅ StyleGAN2-ADA initialized")
         print(f"   Generator: {self.generator.count_params():,} params")
@@ -166,33 +184,28 @@ class StyleGAN2ADA:
             real_logits = self.discriminator([real_images, class_labels], training=True)
             fake_logits = self.discriminator([fake_images, class_labels], training=True)
 
-            disc_loss = self.disc_loss_fn(real_logits, fake_logits)
+            # Cast logits to float32 for stable loss computation
+            real_logits_f32 = tf.cast(real_logits, tf.float32)
+            fake_logits_f32 = tf.cast(fake_logits, tf.float32)
 
-            r1_penalty = tf.constant(0.0, dtype=disc_loss.dtype)
+            disc_loss = self.disc_loss_fn(real_logits_f32, fake_logits_f32)
+
+            r1_penalty = tf.constant(0.0, dtype=tf.float32)
             if do_r1:
-                r1_penalty_raw = r1_regularization(
+                r1_penalty = r1_regularization(
                     self.discriminator, real_images, class_labels, gamma=self.r1_gamma
                 )
-                r1_penalty = tf.cast(r1_penalty_raw, disc_loss.dtype)
-                disc_loss = disc_loss + r1_penalty * tf.cast(self.r1_interval, disc_loss.dtype)
+                disc_loss = disc_loss + r1_penalty * tf.cast(self.r1_interval, tf.float32)
 
-            # Scale loss for mixed precision
-            if self.use_mixed_precision:
-                scaled_loss = self.disc_optimizer.get_scaled_loss(disc_loss)
-            else:
-                scaled_loss = disc_loss
-
-        # Compute and unscale gradients
-        gradients = tape.gradient(scaled_loss, self.discriminator.trainable_variables)
-        if self.use_mixed_precision:
-            gradients = self.disc_optimizer.get_unscaled_gradients(gradients)
+        # Compute gradients (Keras handles scaling automatically)
+        gradients = tape.gradient(disc_loss, self.discriminator.trainable_variables)
 
         # Clip gradients and apply
         gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
         self.disc_optimizer.apply_gradients(zip(gradients, self.discriminator.trainable_variables))
 
         if self.use_ada:
-            self.discriminator.update_ada(real_logits)
+            self.discriminator.update_ada(real_logits_f32)
             ada_p = self.discriminator.ada.p
         else:
             ada_p = tf.constant(0.0)
@@ -208,32 +221,26 @@ class StyleGAN2ADA:
         with tf.GradientTape() as tape:
             fake_images = self.generator([noise, class_labels], training=True)
             fake_logits = self.discriminator([fake_images, class_labels], training=True)
-            gen_loss = self.gen_loss_fn(fake_logits)
+
+            # Cast logits to float32 for stable loss computation
+            fake_logits_f32 = tf.cast(fake_logits, tf.float32)
+            gen_loss = self.gen_loss_fn(fake_logits_f32)
 
             # Path length regularization (lazy - every pl_interval steps)
-            pl_penalty = tf.constant(0.0, dtype=gen_loss.dtype)
+            pl_penalty = tf.constant(0.0, dtype=tf.float32)
             if do_pl and self.use_pl_reg:
-                pl_penalty_raw, new_pl_mean = path_length_regularization(
+                pl_penalty, new_pl_mean = path_length_regularization(
                     self.generator,
                     noise,
                     class_labels,
                     pl_mean=self.pl_mean,
                     pl_weight=self.pl_weight,
                 )
-                pl_penalty = tf.cast(pl_penalty_raw, gen_loss.dtype)
                 # Scale by interval for lazy regularization
-                gen_loss = gen_loss + pl_penalty * tf.cast(self.pl_interval, gen_loss.dtype)
+                gen_loss = gen_loss + pl_penalty * tf.cast(self.pl_interval, tf.float32)
 
-            # Scale loss for mixed precision
-            if self.use_mixed_precision:
-                scaled_loss = self.gen_optimizer.get_scaled_loss(gen_loss)
-            else:
-                scaled_loss = gen_loss
-
-        # Compute and unscale gradients
-        gradients = tape.gradient(scaled_loss, self.generator.trainable_variables)
-        if self.use_mixed_precision:
-            gradients = self.gen_optimizer.get_unscaled_gradients(gradients)
+        # Compute gradients (Keras handles scaling automatically)
+        gradients = tape.gradient(gen_loss, self.generator.trainable_variables)
 
         # Clip gradients and apply
         gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
@@ -245,27 +252,85 @@ class StyleGAN2ADA:
 
         return gen_loss, pl_penalty
 
-    def train_step(self, real_images: tf.Tensor, class_labels: tf.Tensor) -> Dict[str, float]:
+    def _single_replica_train_step(
+        self, real_images: tf.Tensor, class_labels: tf.Tensor, do_r1: bool, do_pl: bool
+    ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        """Single replica training step (used by both single and multi-GPU training)."""
         batch_size = tf.shape(real_images)[0]
-        current_iter = int(self.iteration.numpy())
-        do_r1 = (current_iter > 0) and (current_iter % self.r1_interval == 0)
-        do_pl = (current_iter > 0) and (current_iter % self.pl_interval == 0)
 
         if tf.reduce_any(tf.math.is_nan(real_images)):
             real_images = tf.where(
                 tf.math.is_finite(real_images), real_images, tf.zeros_like(real_images)
             )
 
+        disc_loss = tf.constant(0.0)
+        r1_penalty = tf.constant(0.0)
+        ada_p = tf.constant(0.0)
+
         for _ in range(self.n_critic):
             disc_loss, r1_penalty, ada_p = self.train_discriminator_step(
                 real_images, class_labels, do_r1
             )
-            if not tf.reduce_any(tf.math.is_nan(disc_loss)):
-                self.disc_loss_metric.update_state(disc_loss)
-                self.r1_metric.update_state(r1_penalty)
-                self.ada_p_metric.update_state(ada_p)
 
         gen_loss, pl_penalty = self.train_generator_step(batch_size, class_labels, do_pl)
+
+        return disc_loss, r1_penalty, ada_p, gen_loss, pl_penalty
+
+    def train_step(self, real_images: tf.Tensor, class_labels: tf.Tensor) -> Dict[str, float]:
+        current_iter = int(self.iteration.numpy())
+        do_r1 = (current_iter > 0) and (current_iter % self.r1_interval == 0)
+        do_pl = (current_iter > 0) and (current_iter % self.pl_interval == 0)
+
+        # Handle distributed training
+        if self.num_replicas > 1:
+            # Use strategy.run for distributed execution
+            per_replica_results = self.strategy.run(
+                self._single_replica_train_step,
+                args=(real_images, class_labels, do_r1, do_pl)
+            )
+
+            # Reduce results across replicas
+            disc_loss = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[0], axis=None
+            )
+            r1_penalty = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[1], axis=None
+            )
+            ada_p = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[2], axis=None
+            )
+            gen_loss = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[3], axis=None
+            )
+            pl_penalty = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[4], axis=None
+            )
+        else:
+            # Single GPU/CPU training
+            batch_size = tf.shape(real_images)[0]
+
+            if tf.reduce_any(tf.math.is_nan(real_images)):
+                real_images = tf.where(
+                    tf.math.is_finite(real_images), real_images, tf.zeros_like(real_images)
+                )
+
+            disc_loss = tf.constant(0.0)
+            r1_penalty = tf.constant(0.0)
+            ada_p = tf.constant(0.0)
+
+            for _ in range(self.n_critic):
+                disc_loss, r1_penalty, ada_p = self.train_discriminator_step(
+                    real_images, class_labels, do_r1
+                )
+
+            gen_loss, pl_penalty = self.train_generator_step(batch_size, class_labels, do_pl)
+
+        # Update metrics
+        if not tf.reduce_any(tf.math.is_nan(disc_loss)):
+            self.disc_loss_metric.update_state(disc_loss)
+            self.r1_metric.update_state(r1_penalty)
+            self.ada_p_metric.update_state(ada_p)
+
         if not tf.reduce_any(tf.math.is_nan(gen_loss)):
             self.gen_loss_metric.update_state(gen_loss)
             self.pl_metric.update_state(pl_penalty)
