@@ -172,7 +172,6 @@ class StyleGAN2ADA:
         _ = self.generator([dummy_noise, dummy_labels], training=False)
         _ = self.discriminator([dummy_images, dummy_labels], training=False)
 
-    @tf.function
     def train_discriminator_step(
         self, real_images: tf.Tensor, class_labels: tf.Tensor, do_r1: bool
     ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
@@ -212,7 +211,6 @@ class StyleGAN2ADA:
 
         return disc_loss, r1_penalty, ada_p
 
-    @tf.function
     def train_generator_step(
         self, batch_size: int, class_labels: tf.Tensor, do_pl: bool
     ) -> Tuple[tf.Tensor, tf.Tensor]:
@@ -252,26 +250,23 @@ class StyleGAN2ADA:
 
         return gen_loss, pl_penalty
 
-    def _single_replica_train_step(
+    def _core_train_step(
         self, real_images: tf.Tensor, class_labels: tf.Tensor, do_r1: bool, do_pl: bool
     ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        """Single replica training step (used by both single and multi-GPU training)."""
+        """Core training step logic (used by both single and multi-GPU training)."""
         batch_size = tf.shape(real_images)[0]
 
-        if tf.reduce_any(tf.math.is_nan(real_images)):
-            real_images = tf.where(
-                tf.math.is_finite(real_images), real_images, tf.zeros_like(real_images)
-            )
+        # Handle NaN values
+        real_images = tf.where(
+            tf.math.is_finite(real_images), real_images, tf.zeros_like(real_images)
+        )
 
-        disc_loss = tf.constant(0.0)
-        r1_penalty = tf.constant(0.0)
-        ada_p = tf.constant(0.0)
+        # Train discriminator
+        disc_loss, r1_penalty, ada_p = self.train_discriminator_step(
+            real_images, class_labels, do_r1
+        )
 
-        for _ in range(self.n_critic):
-            disc_loss, r1_penalty, ada_p = self.train_discriminator_step(
-                real_images, class_labels, do_r1
-            )
-
+        # Train generator
         gen_loss, pl_penalty = self.train_generator_step(batch_size, class_labels, do_pl)
 
         return disc_loss, r1_penalty, ada_p, gen_loss, pl_penalty
@@ -281,59 +276,17 @@ class StyleGAN2ADA:
         do_r1 = (current_iter > 0) and (current_iter % self.r1_interval == 0)
         do_pl = (current_iter > 0) and (current_iter % self.pl_interval == 0)
 
-        # Handle distributed training
-        if self.num_replicas > 1:
-            # Use strategy.run for distributed execution
-            per_replica_results = self.strategy.run(
-                self._single_replica_train_step,
-                args=(real_images, class_labels, do_r1, do_pl)
-            )
-
-            # Reduce results across replicas
-            disc_loss = self.strategy.reduce(
-                tf.distribute.ReduceOp.MEAN, per_replica_results[0], axis=None
-            )
-            r1_penalty = self.strategy.reduce(
-                tf.distribute.ReduceOp.MEAN, per_replica_results[1], axis=None
-            )
-            ada_p = self.strategy.reduce(
-                tf.distribute.ReduceOp.MEAN, per_replica_results[2], axis=None
-            )
-            gen_loss = self.strategy.reduce(
-                tf.distribute.ReduceOp.MEAN, per_replica_results[3], axis=None
-            )
-            pl_penalty = self.strategy.reduce(
-                tf.distribute.ReduceOp.MEAN, per_replica_results[4], axis=None
-            )
-        else:
-            # Single GPU/CPU training
-            batch_size = tf.shape(real_images)[0]
-
-            if tf.reduce_any(tf.math.is_nan(real_images)):
-                real_images = tf.where(
-                    tf.math.is_finite(real_images), real_images, tf.zeros_like(real_images)
-                )
-
-            disc_loss = tf.constant(0.0)
-            r1_penalty = tf.constant(0.0)
-            ada_p = tf.constant(0.0)
-
-            for _ in range(self.n_critic):
-                disc_loss, r1_penalty, ada_p = self.train_discriminator_step(
-                    real_images, class_labels, do_r1
-                )
-
-            gen_loss, pl_penalty = self.train_generator_step(batch_size, class_labels, do_pl)
+        # Execute training step (works for both single and multi-GPU)
+        disc_loss, r1_penalty, ada_p, gen_loss, pl_penalty = self._core_train_step(
+            real_images, class_labels, do_r1, do_pl
+        )
 
         # Update metrics
-        if not tf.reduce_any(tf.math.is_nan(disc_loss)):
-            self.disc_loss_metric.update_state(disc_loss)
-            self.r1_metric.update_state(r1_penalty)
-            self.ada_p_metric.update_state(ada_p)
-
-        if not tf.reduce_any(tf.math.is_nan(gen_loss)):
-            self.gen_loss_metric.update_state(gen_loss)
-            self.pl_metric.update_state(pl_penalty)
+        self.disc_loss_metric.update_state(disc_loss)
+        self.r1_metric.update_state(r1_penalty)
+        self.ada_p_metric.update_state(ada_p)
+        self.gen_loss_metric.update_state(gen_loss)
+        self.pl_metric.update_state(pl_penalty)
 
         # Update EMA generator weights
         if self.use_ema:
