@@ -27,6 +27,7 @@ data/05_models/*
 # MLflow
 runs/
 mlruns/
+mlruns_backup/
 mlartifacts/
 
 # DVC

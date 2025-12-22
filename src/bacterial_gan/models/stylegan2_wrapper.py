@@ -1,7 +1,12 @@
 """
 StyleGAN2-ADA training wrapper for bacterial image augmentation.
 
-Provides high-level training loop with ADA, R1 regularization, and checkpointing.
+Provides high-level training loop with:
+- ADA (Adaptive Discriminator Augmentation)
+- R1 and Path Length regularization with lazy computation
+- EMA (Exponential Moving Average) generator for stable inference
+- Mixed precision training with gradient scaling
+- Truncation trick for controlled generation
 """
 
 from pathlib import Path
@@ -11,8 +16,8 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
-from .losses import StyleGAN2ADALoss, get_loss_functions, r1_regularization
-from .stylegan2_ada import build_stylegan2_ada
+from .losses import StyleGAN2ADALoss, get_loss_functions, path_length_regularization, r1_regularization
+from .stylegan2_ada import ExponentialMovingAverage, build_stylegan2_ada
 
 
 class StyleGAN2ADA:
@@ -23,7 +28,10 @@ class StyleGAN2ADA:
     - Class-conditional generation (Gram-positive/Gram-negative)
     - Adaptive Discriminator Augmentation (ADA) for limited data
     - R1 regularization with lazy computation
-    - Mixed precision training support
+    - Path Length regularization for smooth latent space
+    - EMA generator for stable inference
+    - Mixed precision training with gradient scaling
+    - Truncation trick for quality/diversity control
     """
 
     def __init__(
@@ -46,6 +54,9 @@ class StyleGAN2ADA:
         use_simplified: bool = True,
         use_mixed_precision: bool = True,
         n_critic: int = 1,
+        ema_decay: float = 0.999,
+        use_ema: bool = True,
+        use_pl_reg: bool = True,
     ):
         self.latent_dim = latent_dim
         self.num_classes = num_classes
@@ -56,8 +67,14 @@ class StyleGAN2ADA:
         self.loss_type = loss_type
         self.r1_gamma = r1_gamma
         self.r1_interval = r1_interval
+        self.pl_weight = pl_weight
+        self.pl_interval = pl_interval
         self.use_ada = use_ada
         self.n_critic = n_critic
+        self.use_ema = use_ema
+        self.ema_decay = ema_decay
+        self.use_pl_reg = use_pl_reg
+        self.use_mixed_precision = use_mixed_precision
 
         if use_mixed_precision:
             keras.mixed_precision.set_global_policy("mixed_float16")
@@ -86,26 +103,46 @@ class StyleGAN2ADA:
 
         self.gen_loss_fn, self.disc_loss_fn = get_loss_functions(loss_type)
 
-        self.gen_optimizer = keras.optimizers.Adam(
+        # Base optimizers
+        gen_opt = keras.optimizers.Adam(
             learning_rate=learning_rate_g, beta_1=beta1, beta_2=beta2
         )
-        self.disc_optimizer = keras.optimizers.Adam(
+        disc_opt = keras.optimizers.Adam(
             learning_rate=learning_rate_d, beta_1=beta1, beta_2=beta2
         )
 
+        # Wrap with LossScaleOptimizer for mixed precision
+        if use_mixed_precision:
+            self.gen_optimizer = keras.mixed_precision.LossScaleOptimizer(gen_opt)
+            self.disc_optimizer = keras.mixed_precision.LossScaleOptimizer(disc_opt)
+        else:
+            self.gen_optimizer = gen_opt
+            self.disc_optimizer = disc_opt
+
+        # Metrics
         self.gen_loss_metric = keras.metrics.Mean(name="generator_loss")
         self.disc_loss_metric = keras.metrics.Mean(name="discriminator_loss")
         self.r1_metric = keras.metrics.Mean(name="r1_penalty")
+        self.pl_metric = keras.metrics.Mean(name="pl_penalty")
         self.ada_p_metric = keras.metrics.Mean(name="ada_p")
 
         self.iteration = tf.Variable(0, trainable=False, dtype=tf.int64)
 
+        # Path length moving average
+        self.pl_mean = tf.Variable(0.0, trainable=False, dtype=tf.float32)
+
         self._build_models()
+
+        # EMA generator for stable inference
+        if use_ema:
+            self.generator_ema = ExponentialMovingAverage(self.generator, decay=ema_decay)
+            print(f"✅ EMA enabled (decay={ema_decay})")
 
         print("✅ StyleGAN2-ADA initialized")
         print(f"   Generator: {self.generator.count_params():,} params")
         print(f"   Discriminator: {self.discriminator.count_params():,} params")
         print(f"   Loss: {loss_type}, R1 gamma: {r1_gamma}")
+        print(f"   Path Length: {'Enabled' if use_pl_reg else 'Disabled'} (weight={pl_weight})")
         print(f"   ADA: {'Enabled' if use_ada else 'Disabled'}")
 
     def _build_models(self):
@@ -139,7 +176,18 @@ class StyleGAN2ADA:
                 r1_penalty = tf.cast(r1_penalty_raw, disc_loss.dtype)
                 disc_loss = disc_loss + r1_penalty * tf.cast(self.r1_interval, disc_loss.dtype)
 
-        gradients = tape.gradient(disc_loss, self.discriminator.trainable_variables)
+            # Scale loss for mixed precision
+            if self.use_mixed_precision:
+                scaled_loss = self.disc_optimizer.get_scaled_loss(disc_loss)
+            else:
+                scaled_loss = disc_loss
+
+        # Compute and unscale gradients
+        gradients = tape.gradient(scaled_loss, self.discriminator.trainable_variables)
+        if self.use_mixed_precision:
+            gradients = self.disc_optimizer.get_unscaled_gradients(gradients)
+
+        # Clip gradients and apply
         gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
         self.disc_optimizer.apply_gradients(zip(gradients, self.discriminator.trainable_variables))
 
@@ -152,7 +200,9 @@ class StyleGAN2ADA:
         return disc_loss, r1_penalty, ada_p
 
     @tf.function
-    def train_generator_step(self, batch_size: int, class_labels: tf.Tensor) -> tf.Tensor:
+    def train_generator_step(
+        self, batch_size: int, class_labels: tf.Tensor, do_pl: bool
+    ) -> Tuple[tf.Tensor, tf.Tensor]:
         noise = tf.random.normal([batch_size, self.latent_dim])
 
         with tf.GradientTape() as tape:
@@ -160,16 +210,46 @@ class StyleGAN2ADA:
             fake_logits = self.discriminator([fake_images, class_labels], training=True)
             gen_loss = self.gen_loss_fn(fake_logits)
 
-        gradients = tape.gradient(gen_loss, self.generator.trainable_variables)
+            # Path length regularization (lazy - every pl_interval steps)
+            pl_penalty = tf.constant(0.0, dtype=gen_loss.dtype)
+            if do_pl and self.use_pl_reg:
+                pl_penalty_raw, new_pl_mean = path_length_regularization(
+                    self.generator,
+                    noise,
+                    class_labels,
+                    pl_mean=self.pl_mean,
+                    pl_weight=self.pl_weight,
+                )
+                pl_penalty = tf.cast(pl_penalty_raw, gen_loss.dtype)
+                # Scale by interval for lazy regularization
+                gen_loss = gen_loss + pl_penalty * tf.cast(self.pl_interval, gen_loss.dtype)
+
+            # Scale loss for mixed precision
+            if self.use_mixed_precision:
+                scaled_loss = self.gen_optimizer.get_scaled_loss(gen_loss)
+            else:
+                scaled_loss = gen_loss
+
+        # Compute and unscale gradients
+        gradients = tape.gradient(scaled_loss, self.generator.trainable_variables)
+        if self.use_mixed_precision:
+            gradients = self.gen_optimizer.get_unscaled_gradients(gradients)
+
+        # Clip gradients and apply
         gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
         self.gen_optimizer.apply_gradients(zip(gradients, self.generator.trainable_variables))
 
-        return gen_loss
+        # Update path length moving average
+        if do_pl and self.use_pl_reg:
+            self.pl_mean.assign(new_pl_mean)
+
+        return gen_loss, pl_penalty
 
     def train_step(self, real_images: tf.Tensor, class_labels: tf.Tensor) -> Dict[str, float]:
         batch_size = tf.shape(real_images)[0]
         current_iter = int(self.iteration.numpy())
         do_r1 = (current_iter > 0) and (current_iter % self.r1_interval == 0)
+        do_pl = (current_iter > 0) and (current_iter % self.pl_interval == 0)
 
         if tf.reduce_any(tf.math.is_nan(real_images)):
             real_images = tf.where(
@@ -185,9 +265,14 @@ class StyleGAN2ADA:
                 self.r1_metric.update_state(r1_penalty)
                 self.ada_p_metric.update_state(ada_p)
 
-        gen_loss = self.train_generator_step(batch_size, class_labels)
+        gen_loss, pl_penalty = self.train_generator_step(batch_size, class_labels, do_pl)
         if not tf.reduce_any(tf.math.is_nan(gen_loss)):
             self.gen_loss_metric.update_state(gen_loss)
+            self.pl_metric.update_state(pl_penalty)
+
+        # Update EMA generator weights
+        if self.use_ema:
+            self.generator_ema.update()
 
         self.iteration.assign_add(1)
 
@@ -195,6 +280,7 @@ class StyleGAN2ADA:
             "gen_loss": float(self.gen_loss_metric.result()),
             "disc_loss": float(self.disc_loss_metric.result()),
             "r1_penalty": float(self.r1_metric.result()),
+            "pl_penalty": float(self.pl_metric.result()),
             "ada_p": float(self.ada_p_metric.result()),
         }
 
@@ -203,7 +289,22 @@ class StyleGAN2ADA:
         class_labels: Optional[tf.Tensor] = None,
         num_samples: int = 16,
         noise: Optional[tf.Tensor] = None,
+        use_ema: bool = True,
+        truncation_psi: float = 1.0,
     ) -> np.ndarray:
+        """
+        Generate samples using the generator.
+
+        Args:
+            class_labels: Optional class labels. If None, balanced across classes.
+            num_samples: Number of samples to generate.
+            noise: Optional latent vectors. If None, randomly sampled.
+            use_ema: Whether to use EMA generator weights (recommended for quality).
+            truncation_psi: Truncation strength (0=w_avg, 1=no truncation, 0.7 typical).
+
+        Returns:
+            Generated images as numpy array [N, H, W, C].
+        """
         if class_labels is None:
             samples_per_class = num_samples // self.num_classes
             class_labels = []
@@ -216,7 +317,24 @@ class StyleGAN2ADA:
         if noise is None:
             noise = tf.random.normal([num_samples, self.latent_dim])
 
-        return self.generator([noise, class_labels], training=False).numpy()
+        # Use EMA weights if available and requested
+        if use_ema and self.use_ema:
+            self.generator_ema.apply_shadow()
+
+        try:
+            # Use truncation if generator supports it and psi != 1.0
+            if truncation_psi != 1.0 and hasattr(self.generator, 'generate_truncated'):
+                images = self.generator.generate_truncated(
+                    noise, class_labels, truncation_psi=truncation_psi
+                ).numpy()
+            else:
+                images = self.generator([noise, class_labels], training=False).numpy()
+        finally:
+            # Restore original weights if EMA was applied
+            if use_ema and self.use_ema:
+                self.generator_ema.restore()
+
+        return images
 
     def save_checkpoint(self, filepath: str, epoch: int, metadata: Optional[Dict] = None):
         filepath = Path(filepath)
@@ -227,6 +345,7 @@ class StyleGAN2ADA:
             "iteration": int(self.iteration.numpy()),
             "generator_weights": self.generator.get_weights(),
             "discriminator_weights": self.discriminator.get_weights(),
+            "pl_mean": float(self.pl_mean.numpy()),
             "config": {
                 "latent_dim": self.latent_dim,
                 "num_classes": self.num_classes,
@@ -236,7 +355,10 @@ class StyleGAN2ADA:
                 "learning_rate_d": self.learning_rate_d,
                 "loss_type": self.loss_type,
                 "r1_gamma": self.r1_gamma,
+                "pl_weight": self.pl_weight,
                 "use_ada": self.use_ada,
+                "use_ema": self.use_ema,
+                "ema_decay": self.ema_decay,
             },
         }
 
@@ -255,6 +377,17 @@ class StyleGAN2ADA:
         if self.use_ada:
             checkpoint["ada_p"] = float(self.discriminator.ada.p.numpy())
 
+        # Save EMA weights
+        if self.use_ema:
+            ema_shadow = self.generator_ema.get_shadow_variables()
+            checkpoint["ema_weights"] = {
+                name: var.numpy() for name, var in ema_shadow.items()
+            }
+
+        # Save w_avg if generator has it (for truncation trick)
+        if hasattr(self.generator, 'w_avg'):
+            checkpoint["w_avg"] = self.generator.w_avg.numpy()
+
         if metadata:
             checkpoint["metadata"] = metadata
 
@@ -270,6 +403,10 @@ class StyleGAN2ADA:
         if "iteration" in checkpoint:
             self.iteration.assign(checkpoint["iteration"])
 
+        if "pl_mean" in checkpoint:
+            self.pl_mean.assign(checkpoint["pl_mean"])
+
+        # Build optimizers if needed
         if not self.gen_optimizer.built:
             self.gen_optimizer.build(self.generator.trainable_variables)
         if not self.disc_optimizer.built:
@@ -296,6 +433,17 @@ class StyleGAN2ADA:
         if self.use_ada and "ada_p" in checkpoint:
             self.discriminator.ada.p.assign(checkpoint["ada_p"])
 
+        # Load EMA weights
+        if self.use_ema and "ema_weights" in checkpoint:
+            try:
+                self.generator_ema.set_shadow_variables(checkpoint["ema_weights"])
+            except Exception:
+                pass
+
+        # Load w_avg for truncation trick
+        if hasattr(self.generator, 'w_avg') and "w_avg" in checkpoint:
+            self.generator.w_avg.assign(checkpoint["w_avg"])
+
         print(f"✅ Loaded checkpoint: {filepath} (epoch {checkpoint['epoch']})")
         return checkpoint
 
@@ -303,6 +451,7 @@ class StyleGAN2ADA:
         self.gen_loss_metric.reset_state()
         self.disc_loss_metric.reset_state()
         self.r1_metric.reset_state()
+        self.pl_metric.reset_state()
         self.ada_p_metric.reset_state()
 
     def save_generator(self, filepath: str):

@@ -37,14 +37,14 @@ preprocessing:
   # │   'center' - Center crop to image_size x image_size                     │
   # │   'random' - Random crop to image_size x image_size                     │
   # └─────────────────────────────────────────────────────────────────────────┘
-  preprocess_mode: "resize"
+  preprocess_mode: "patch"
   
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ IMAGE SIZE - Set this to match training.image_size                      │
   # │   128 = GTX 1650 (4GB), faster training                                 │
   # │   256 = RTX 3060+ (8GB+), better quality                                │
   # └─────────────────────────────────────────────────────────────────────────┘
-  image_size: 128
+  image_size: 256
   
   apply_augmentation: false     # Augmentation is done during training, not here
   bg_threshold: 0.9             # For patch extraction: skip if >90% white
@@ -63,7 +63,7 @@ training:
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ ARCHITECTURE                                                            │
   # └─────────────────────────────────────────────────────────────────────────┘
-  use_simplified: true          # true = works on 4GB VRAM, false = needs 8GB+
+  use_simplified: false          # true = works on 4GB VRAM, false = needs 8GB+
   
   # IMAGE SIZE - Must match preprocessing.image_size!
   # ┌──────────┬────────────┬─────────────┬──────────────────┐
@@ -73,7 +73,7 @@ training:
   # │ 256      │ ~6-8 GB    │ 8-16        │ RTX 3060         │
   # │ 512      │ ~12-16 GB  │ 4-8         │ RTX 3090 / A100  │
   # └──────────┴────────────┴─────────────┴──────────────────┘
-  image_size: 128
+  image_size: 256
   
   num_classes: 2                # 2 = gram_positive, gram_negative
   channels: 3                   # RGB
@@ -85,7 +85,7 @@ training:
   # Batch size recommendations:
   #   - 128x128 on GTX 1650: batch_size=16
   #   - 256x256 on RTX 3060: batch_size=8
-  batch_size: 16
+  batch_size: 8
   epochs: 300
   
   # Learning rates (default StyleGAN2 values work well)
@@ -99,20 +99,37 @@ training:
   # │ LOSS & REGULARIZATION                                                   │
   # └─────────────────────────────────────────────────────────────────────────┘
   loss_type: "stylegan2"        # 'stylegan2' or 'wgan-gp'
-  
+
   # R1 Regularization (stabilizes discriminator)
   r1_gamma: 10.0
-  r1_interval: 16               # Apply every N batches
-  
+  r1_interval: 16               # Apply every N batches (lazy regularization)
+
   # Path Length Regularization (smoother latent space)
   pl_weight: 2.0
-  pl_interval: 4
+  pl_interval: 4                # Apply every N batches (lazy regularization)
+  use_pl_reg: true              # Enable path length regularization
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ ADAPTIVE DISCRIMINATOR AUGMENTATION (ADA)                               │
   # └─────────────────────────────────────────────────────────────────────────┘
   use_ada: true                 # Prevents overfitting on small datasets
   ada_target: 0.6               # Target: 60% of D outputs are "real-looking"
+
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ EMA (EXPONENTIAL MOVING AVERAGE)                                        │
+  # └─────────────────────────────────────────────────────────────────────────┘
+  # EMA maintains a smoothed copy of generator weights for stable inference
+  use_ema: true                 # Highly recommended for better FID scores
+  ema_decay: 0.999              # Higher = smoother (0.999-0.9999)
+
+  # ┌─────────────────────────────────────────────────────────────────────────┐
+  # │ STYLE MIXING & TRUNCATION                                               │
+  # └─────────────────────────────────────────────────────────────────────────┘
+  # Style mixing: use two different latent vectors during training
+  style_mixing_prob: 0.9        # 90% of batches use style mixing
+
+  # Truncation trick: control diversity vs. quality at generation time
+  truncation_psi: 0.7           # 0 = average face, 1 = full diversity
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ PERFORMANCE & MEMORY                                                    │

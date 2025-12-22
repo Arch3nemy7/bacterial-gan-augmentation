@@ -55,11 +55,15 @@ class MemoryOptimizationConfig(BaseModel):
 
 class TrainingConfig(BaseModel):
     """StyleGAN2-ADA training configuration."""
+
+    # Architecture
     use_simplified: bool = True
     image_size: int = 256
     num_classes: int = 2
     channels: int = 3
     latent_dim: int = 256
+
+    # Training
     batch_size: int = 16
     epochs: int = 200
     learning_rate_g: float = 0.0002
@@ -68,21 +72,46 @@ class TrainingConfig(BaseModel):
     beta2: float = 0.99
     n_critic: int = 1
     loss_type: str = "stylegan2"
+
+    # Regularization
     r1_gamma: float = 10.0
     r1_interval: int = 16
     pl_weight: float = 2.0
     pl_interval: int = 4
+    use_pl_reg: bool = True
+
+    # ADA (Adaptive Discriminator Augmentation)
     use_ada: bool = True
     ada_target: float = 0.6
+
+    # EMA (Exponential Moving Average) for generator
+    use_ema: bool = True
+    ema_decay: float = 0.999
+
+    # Style mixing regularization
+    style_mixing_prob: float = 0.9
+
+    # Truncation trick for generation
+    truncation_psi: float = 0.7
+
+    # Mixed precision
     use_mixed_precision: bool = True
+
+    # Memory optimization
     memory_optimization: MemoryOptimizationConfig = MemoryOptimizationConfig()
+
+    # Checkpointing and sampling
     checkpoint_interval: int = 50
     sample_interval: int = 10
     num_samples_during_training: int = 2
     num_samples_final: int = 8
     num_samples_grid: int = 16
+
+    # MLflow
     mlflow_experiment_name: str = "Bacterial GAN Augmentation"
     mlflow_tracking_uri: str = ""
+
+    # Debug/testing
     dummy_num_batches: int = 10
 
 
