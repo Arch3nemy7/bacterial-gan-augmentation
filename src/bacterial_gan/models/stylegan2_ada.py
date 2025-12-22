@@ -575,7 +575,11 @@ class StyleGAN2Generator(keras.Model):
 
         # Generate images
         images = self.synthesis(w_all)
-        return tf.clip_by_value(images, -1.0, 1.0)
+        return tf.clip_by_value(
+            images,
+            tf.constant(-1.0, dtype=images.dtype),
+            tf.constant(1.0, dtype=images.dtype),
+        )
 
     def generate_truncated(
         self,
@@ -624,7 +628,11 @@ class StyleGAN2Generator(keras.Model):
 
         # Generate images
         images = self.synthesis(w_broadcast)
-        return tf.clip_by_value(images, -1.0, 1.0)
+        return tf.clip_by_value(
+            images,
+            tf.constant(-1.0, dtype=images.dtype),
+            tf.constant(1.0, dtype=images.dtype),
+        )
 
 
 class MinibatchStdDev(layers.Layer):
@@ -784,9 +792,15 @@ class AdaptiveAugmentation(layers.Layer):
         return images
 
     def _apply_geometric(self, images: tf.Tensor, batch_size: int) -> tf.Tensor:
-        """Apply translation, rotation, and scaling."""
-        h = tf.shape(images)[1]
-        w = tf.shape(images)[2]
+        """Apply translation, rotation, and scaling (mixed precision compatible)."""
+        # Save original dtype for later restoration
+        original_dtype = images.dtype
+
+        # ImageProjectiveTransformV3 requires float32 images
+        images_f32 = tf.cast(images, tf.float32)
+
+        h = tf.shape(images_f32)[1]
+        w = tf.shape(images_f32)[2]
         h_f = tf.cast(h, tf.float32)
         w_f = tf.cast(w, tf.float32)
 
@@ -820,16 +834,17 @@ class AdaptiveAugmentation(layers.Layer):
 
         transforms = tf.stack([a0, a1, a2, b0, b1, b2, tf.zeros(batch_size), tf.zeros(batch_size)], axis=1)
 
-        images = tf.raw_ops.ImageProjectiveTransformV3(
-            images=images,
+        images_transformed = tf.raw_ops.ImageProjectiveTransformV3(
+            images=images_f32,
             transforms=transforms,
-            output_shape=tf.shape(images)[1:3],
+            output_shape=tf.shape(images_f32)[1:3],
             interpolation="BILINEAR",
             fill_mode="REFLECT",
             fill_value=0.0,
         )
 
-        return images
+        # Cast back to original dtype
+        return tf.cast(images_transformed, original_dtype)
 
     def _apply_color(self, images: tf.Tensor, batch_size: int) -> tf.Tensor:
         """Apply saturation and hue adjustments (mixed precision compatible)."""
@@ -941,6 +956,7 @@ class AdaptiveAugmentation(layers.Layer):
             return images
 
         batch_size = tf.shape(images)[0]
+        dtype = images.dtype
 
         def apply_augmentation():
             aug_images = images
@@ -964,7 +980,12 @@ class AdaptiveAugmentation(layers.Layer):
             if self.enable_cutout:
                 aug_images = self._apply_cutout(aug_images, batch_size)
 
-            return tf.clip_by_value(aug_images, -1.0, 1.0)
+            # Use dtype-aware clip values for mixed precision compatibility
+            return tf.clip_by_value(
+                aug_images,
+                tf.constant(-1.0, dtype=dtype),
+                tf.constant(1.0, dtype=dtype),
+            )
 
         def no_augmentation():
             return images
