@@ -76,9 +76,11 @@ def path_length_regularization(
         else:
             fake_images = generator(latent_w, training=True)
 
-        noise = tf.random.normal(tf.shape(fake_images)) / np.sqrt(
-            float(fake_images.shape[1] * fake_images.shape[2])
-        )
+        # Generate noise with same dtype as fake_images for mixed precision compatibility
+        noise = tf.random.normal(tf.shape(fake_images), dtype=tf.float32)
+        noise = noise / np.sqrt(float(fake_images.shape[1] * fake_images.shape[2]))
+        # Cast noise to match fake_images dtype
+        noise = tf.cast(noise, fake_images.dtype)
         output = tf.reduce_sum(fake_images * noise)
 
     gradients = tape.gradient(output, latent_w)
