@@ -1,128 +1,261 @@
-# Bacterial GAN Augmentation
+# Bacterial Image Analysis - Multi-Project Repository
 
-A deep learning project for bacterial image augmentation using **StyleGAN2-ADA** to generate synthetic Gram-positive and Gram-negative bacterial images for improved classification.
+This repository contains **two separate but related projects** for bacterial image analysis:
+
+1. **StyleGAN2-ADA** - Synthetic bacterial image generation
+2. **YOLO Detection** - Bacterial detection and classification
 
 ## 🎯 Overview
 
-This project uses StyleGAN2-ADA (Adaptive Discriminator Augmentation) to generate realistic synthetic bacterial images, specifically designed for:
-- Limited data scenarios common in medical imaging
-- Class-conditional generation (Gram-positive vs Gram-negative)
-- Resource-constrained training (optimized for <16GB VRAM)
+### StyleGAN2-ADA Project (Main Directory)
+Generate synthetic bacterial images using StyleGAN2-ADA to augment limited medical imaging datasets.
 
-## 🏗️ Architecture
+- **Purpose**: Data augmentation for bacterial classification
+- **Technology**: StyleGAN2 with Adaptive Discriminator Augmentation
+- **Output**: Synthetic 256×256 RGB bacterial images
+- **Classes**: Gram-positive and Gram-negative bacteria
 
-### StyleGAN2-ADA
-- **Mapping Network**: Transforms z → w latent space for better disentanglement
-- **Synthesis Network**: Style-modulated image generation at 256×256 resolution
-- **Discriminator**: With Adaptive Discriminator Augmentation (ADA)
-- **Class Conditioning**: Via projection discriminator and class embeddings
+### YOLO Detection Project (`yolo_detection/`)
+Detect and classify bacterial types in microscopy images using YOLOv8.
 
-### Key Features
-- **ADA**: Dynamically adjusts augmentation to prevent discriminator overfitting
-- **R1 Regularization**: Gradient penalty for stable training
-- **Lazy Regularization**: Efficient computation (R1 every 16 steps)
-- **Simplified Mode**: For GPUs with <16GB VRAM
+- **Purpose**: Object detection and classification
+- **Technology**: YOLOv8 with 4-class detection
+- **Output**: Bounding boxes with bacterial type classification
+- **Classes**: negative_cocci, positive_cocci, negative_bacilli, positive_bacilli
 
-## 🚀 Quick Start
-
-```bash
-# Installation
-git clone <repository-url>
-cd bacterial-gan-augmentation
-poetry install
-
-# Prepare data
-# Place images in: data/01_raw/gram_positive/ and data/01_raw/gram_negative/
-poetry run python scripts/prepare_data.py
-
-# Training
-bacterial-gan train
-
-# Generate synthetic data
-bacterial-gan generate-data --run-id <mlflow-run-id> --num-images 1000
-
-# Run API
-make run-api
-```
-
-## 📁 Project Structure
+## 📂 Repository Structure
 
 ```
 bacterial-gan-augmentation/
-├── src/bacterial_gan/
-│   ├── models/
-│   │   ├── stylegan2_ada.py      # Generator & Discriminator
-│   │   ├── stylegan2_wrapper.py  # Training wrapper
-│   │   └── losses.py             # R1, path length, logistic loss
-│   ├── pipelines/
-│   │   ├── train_pipeline.py     # Training with MLflow
-│   │   ├── evaluate_pipeline.py  # FID, IS, accuracy
-│   │   └── generate_data_pipeline.py
-│   ├── data/
-│   │   ├── dataset.py            # Data loading
-│   │   └── data_processing.py    # Patch extraction
-│   └── config.py                 # Configuration
-├── app/                          # FastAPI application
-├── configs/config.yaml          # Training configuration
-├── scripts/                      # Utility scripts
-└── tests/                        # Unit tests
+├── yolo_detection/              # ⭐ YOLO Detection Project (SEPARATE)
+│   ├── configs/                 # YOLO dataset configs
+│   ├── data/                    # Symlink to detection dataset
+│   ├── docs/                    # YOLO documentation
+│   ├── runs/                    # Training outputs
+│   ├── scripts/                 # YOLO training & visualization
+│   └── README.md                # YOLO project README
+│
+├── src/bacterial_gan/           # 🧬 StyleGAN2-ADA Project (MAIN)
+│   ├── models/                  # Generator, Discriminator, Losses
+│   ├── pipelines/               # Training, evaluation, generation
+│   ├── data/                    # Data loading and processing
+│   └── cli.py                   # CLI interface
+│
+├── configs/                     # StyleGAN2-ADA configurations
+│   └── config.yaml              # Main training config
+├── data/                        # Shared dataset directory
+│   ├── 01_raw/                  # Raw images
+│   ├── 02_processed/            # Processed patches
+│   └── 03_synthetic/            # Generated images
+├── app/                         # FastAPI inference server
+├── scripts/                     # StyleGAN2-ADA scripts
+├── notebooks/                   # Jupyter notebooks
+├── tests/                       # Unit tests
+└── README.md                    # This file
 ```
 
-## ⚙️ Configuration
+## 🚀 Quick Start
 
-Key settings in `configs/config.yaml`:
+### StyleGAN2-ADA (Data Augmentation)
 
-```yaml
-training:
-  use_simplified: true       # For <16GB VRAM
-  image_size: 256
-  batch_size: 12
-  epochs: 300
-  learning_rate_g: 0.0002
-  learning_rate_d: 0.0002
-  
-  # Regularization
-  r1_gamma: 10.0
-  r1_interval: 16
-  
-  # ADA
-  use_ada: true
-  ada_target: 0.6
+```bash
+# Install dependencies
+poetry install
+
+# Prepare training data
+poetry run python scripts/prepare_data.py
+
+# Train GAN
+bacterial-gan train --config configs/config.yaml
+
+# Generate synthetic images
+bacterial-gan generate-data --run-id <mlflow-run-id> --num-images 1000
+
+# Evaluate quality
+bacterial-gan evaluate --run-id <mlflow-run-id>
 ```
 
-## 📊 MLflow Tracking
+### YOLO Detection (Bacterial Classification)
 
-All training runs are tracked with:
-- **Parameters**: Architecture settings, hyperparameters
-- **Metrics**: generator_loss, discriminator_loss, r1_penalty, ada_probability
-- **Artifacts**: Sample images, checkpoints, final model
+```bash
+# Navigate to YOLO project
+cd yolo_detection/
 
-View experiments: `mlflow ui`
+# Install YOLO dependencies (if not already installed)
+pip install ultralytics opencv-python tqdm
 
-## 📈 Evaluation Metrics
+# Visualize dataset
+cd scripts
+python visualize_yolo_labels.py --split train --max-images 50
 
-- **FID Score**: Image quality measurement
-- **Inception Score**: Diversity and quality
-- **Classification Accuracy**: Downstream task performance
+# Train YOLO model
+python train_yolo.py --epochs 100 --batch 16
 
-## 🛠️ Development
+# Results in: yolo_detection/runs/bacteria_detection/
+```
 
+## 📊 Datasets
+
+### StyleGAN2-ADA Dataset
+- **Location**: `data/01_raw/`
+- **Structure**:
+  - `gram_positive/` - Gram-positive bacterial images
+  - `gram_negative/` - Gram-negative bacterial images
+- **Format**: RGB images, various sizes
+- **Processing**: Extracted to 256×256 patches
+
+### YOLO Detection Dataset
+- **Location**: `data/01_raw/1. DeepDataSet/DetectionDataSet/`
+- **Structure**:
+  - `images/` - 6,005 bacterial microscopy images
+  - `labels/` - YOLO format labels
+  - `txt/` - Train/val/test splits
+- **Classes**: 4 types (negative/positive × cocci/bacilli)
+- **Format**: YOLO detection format
+
+## 🔧 Technologies
+
+### StyleGAN2-ADA
+- **Framework**: TensorFlow/Keras
+- **Package Management**: Poetry
+- **Experiment Tracking**: MLflow
+- **Pipeline Management**: DVC
+- **API**: FastAPI
+- **CLI**: Typer
+
+### YOLO Detection
+- **Framework**: Ultralytics YOLOv8
+- **Dependencies**: OpenCV, NumPy, tqdm
+- **Format**: YOLO detection format
+
+## 📖 Documentation
+
+### StyleGAN2-ADA Docs
+- `CLAUDE.md` - Project instructions and architecture
+- `QUICK_START.md` - Quick start guide
+- `INSTALLATION.md` - Installation instructions
+- `docs/architecture.md` - Detailed architecture
+
+### YOLO Detection Docs
+- `yolo_detection/README.md` - YOLO project overview
+- `yolo_detection/docs/README_YOLO.md` - Detailed usage guide
+
+## 🎯 Use Cases
+
+### Combined Workflow
+1. **Train StyleGAN2-ADA** to generate synthetic bacterial images
+2. **Augment training dataset** with generated images
+3. **Train YOLO detector** on augmented dataset
+4. **Deploy YOLO model** for bacterial detection
+
+### Individual Use
+- **StyleGAN2-ADA only**: Data augmentation for classification tasks
+- **YOLO only**: Bacterial detection and localization
+
+## 🔗 Project Separation
+
+These projects are intentionally separated:
+
+| Aspect | StyleGAN2-ADA | YOLO Detection |
+|--------|---------------|----------------|
+| **Purpose** | Generate synthetic images | Detect and classify bacteria |
+| **Location** | Root directory | `yolo_detection/` |
+| **Technology** | TensorFlow, StyleGAN2 | PyTorch, YOLOv8 |
+| **Output** | Full images | Bounding boxes |
+| **Dataset** | Image-level labels | Object-level annotations |
+
+## 🚧 Development
+
+### StyleGAN2-ADA Development
 ```bash
 # Format code
 make format
 
-# Lint
+# Run linting
 make lint
 
 # Run tests
 make test
+
+# Start API server
+make run-api
 ```
 
-## 📚 References
+### YOLO Development
+```bash
+cd yolo_detection/scripts
 
-- [StyleGAN2-ADA Paper](https://arxiv.org/abs/2006.06676)
-- [StyleGAN2 Paper](https://arxiv.org/abs/1912.04958)
+# Create new splits
+python create_yolo_splits.py --train-ratio 0.7
 
-## 📄 License
+# Visualize predictions
+python visualize_yolo_labels.py --split val
+```
 
-MIT License
+## 📦 Installation
+
+### Full Installation (Both Projects)
+```bash
+# Clone repository
+git clone <repo-url>
+cd bacterial-gan-augmentation
+
+# Install StyleGAN2-ADA
+poetry install
+
+# Install YOLO dependencies
+pip install ultralytics opencv-python tqdm
+```
+
+### Individual Installation
+
+**StyleGAN2-ADA only:**
+```bash
+poetry install
+```
+
+**YOLO only:**
+```bash
+cd yolo_detection
+pip install ultralytics opencv-python tqdm
+```
+
+## 🐛 Troubleshooting
+
+### StyleGAN2-ADA Issues
+- **OOM Errors**: Use `use_simplified: true` in config
+- **Mixed Precision**: Enabled by default for memory efficiency
+- **Multi-GPU**: Automatic detection and usage
+
+### YOLO Issues
+- **OOM**: Reduce batch size (`--batch 8`)
+- **Slow Training**: Use smaller model (`--model yolov8n.pt`)
+- **Dataset Not Found**: Check symlink in `yolo_detection/data/`
+
+## 📧 Support
+
+For project-specific issues:
+- **StyleGAN2-ADA**: See main documentation
+- **YOLO Detection**: See `yolo_detection/README.md`
+
+## 📝 License
+
+See LICENSE file for details.
+
+## ✨ Features
+
+### StyleGAN2-ADA
+- ✅ Class-conditional generation
+- ✅ Adaptive augmentation (ADA)
+- ✅ Mixed precision training
+- ✅ Multi-GPU support
+- ✅ MLflow experiment tracking
+- ✅ FastAPI inference server
+
+### YOLO Detection
+- ✅ 4-class bacterial detection
+- ✅ Color-coded visualizations
+- ✅ Easy-to-use CLI
+- ✅ Automated train/val/test splits
+- ✅ GPU-accelerated training
+- ✅ Real-time inference

@@ -276,10 +276,33 @@ class StyleGAN2ADA:
         do_r1 = (current_iter > 0) and (current_iter % self.r1_interval == 0)
         do_pl = (current_iter > 0) and (current_iter % self.pl_interval == 0)
 
-        # Execute training step (works for both single and multi-GPU)
-        disc_loss, r1_penalty, ada_p, gen_loss, pl_penalty = self._core_train_step(
-            real_images, class_labels, do_r1, do_pl
-        )
+        # Execute training step - use strategy.run() for multi-GPU
+        if self.num_replicas > 1:
+            # Multi-GPU: run on each replica and reduce
+            per_replica_results = self.strategy.run(
+                self._core_train_step, args=(real_images, class_labels, do_r1, do_pl)
+            )
+            # Reduce results across replicas
+            disc_loss = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[0], axis=None
+            )
+            r1_penalty = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[1], axis=None
+            )
+            ada_p = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[2], axis=None
+            )
+            gen_loss = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[3], axis=None
+            )
+            pl_penalty = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[4], axis=None
+            )
+        else:
+            # Single GPU: run directly
+            disc_loss, r1_penalty, ada_p, gen_loss, pl_penalty = self._core_train_step(
+                real_images, class_labels, do_r1, do_pl
+            )
 
         # Update metrics
         self.disc_loss_metric.update_state(disc_loss)

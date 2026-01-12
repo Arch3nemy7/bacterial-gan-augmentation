@@ -164,7 +164,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         print("📂 Loading dataset...")
         processed_data_path = Path(settings.data.processed_data_dir) / "train"
 
-        # Use the configured batch size (MirroredStrategy handles distribution automatically)
+        # For multi-GPU, use per-replica batch size (total = batch_size * num_gpus)
         batch_size = settings.training.batch_size
 
         train_dataset = None
@@ -191,6 +191,11 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                 image_size=settings.training.image_size,
             )
             num_batches = settings.training.dummy_num_batches
+
+        # Distribute dataset for multi-GPU training
+        if gan.num_replicas > 1:
+            train_dataset = gan.strategy.experimental_distribute_dataset(train_dataset)
+            print(f"📊 Dataset distributed across {gan.num_replicas} GPUs")
 
         print()
 

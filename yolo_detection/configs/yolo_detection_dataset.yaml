@@ -1,0 +1,19 @@
+# YOLOv8 Detection Dataset Configuration for Bacterial Detection
+# Dataset: DeepDataSet DetectionDataSet
+# 4 classes: negative cocci, positive cocci, negative bacilli, positive bacilli
+
+# Use absolute path to DetectionDataSet (avoids relative path resolution issues)
+path: /home/arch3nemy7/Documents/bacterial-gan-augmentation/data/01_raw/1. DeepDataSet/DetectionDataSet
+train: txt/train_new.txt
+val: txt/val_new.txt
+test: txt/test_new.txt
+
+# Number of classes
+nc: 4
+
+# Class names
+names:
+  0: negative_cocci # Red
+  1: positive_cocci # Green
+  2: negative_bacilli # Dark blue
+  3: positive_bacilli # Light blue
