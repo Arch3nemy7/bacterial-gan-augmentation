@@ -128,5 +128,50 @@ def generate_data(
     typer.secho("✅ Generation completed!", fg=typer.colors.GREEN)
 
 
+@app.command()
+def reduce_dataset(
+    input_dir: str = typer.Argument(..., help="Input directory containing images"),
+    output_dir: str = typer.Argument(..., help="Output directory for reduced dataset"),
+    target_size: int = typer.Option(
+        default=5000, help="Target number of images in reduced dataset"
+    ),
+    seed: int = typer.Option(default=42, help="Random seed for reproducibility"),
+    dry_run: bool = typer.Option(
+        default=False, help="Only report what would be done, don't copy files"
+    ),
+):
+    """
+    Reduce dataset size while preserving diversity using feature clustering.
+    
+    Useful for reducing training time and server costs while maintaining
+    a representative sample of the original dataset.
+    
+    Examples:
+        bacterial-gan reduce-dataset data/02_processed/train data/reduced --target-size 5000
+        bacterial-gan reduce-dataset data/02_processed/train data/reduced -n 3000 --dry-run
+    """
+    from bacterial_gan.utils.reduce_dataset import reduce_dataset as run_reduce
+    
+    typer.echo(f"🔄 Reducing dataset: {input_dir} → {output_dir}")
+    typer.echo(f"   Target size: {target_size} images")
+    
+    result = run_reduce(
+        input_dir=Path(input_dir),
+        output_dir=Path(output_dir),
+        target_size=target_size,
+        random_seed=seed,
+        dry_run=dry_run,
+    )
+    
+    if result["reduced"] > 0:
+        pct_reduction = (1 - result["reduced"] / result["original"]) * 100
+        typer.secho(
+            f"✅ Reduced: {result['original']} → {result['reduced']} images ({pct_reduction:.1f}% reduction)",
+            fg=typer.colors.GREEN,
+        )
+    else:
+        typer.secho("❌ No images found or reduction failed", fg=typer.colors.RED)
+
+
 if __name__ == "__main__":
     app()
