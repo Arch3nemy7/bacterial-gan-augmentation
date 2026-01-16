@@ -275,11 +275,15 @@ class StyleGAN2ADA:
         do_r1 = (current_iter > 0) and (current_iter % self.r1_interval == 0)
         do_pl = (current_iter > 0) and (current_iter % self.pl_interval == 0)
 
+        # Convert to tf.constant for graph compatibility with MirroredStrategy
+        do_r1_tensor = tf.constant(do_r1, dtype=tf.bool)
+        do_pl_tensor = tf.constant(do_pl, dtype=tf.bool)
+
         # Execute training step - use strategy.run() for multi-GPU
         if self.num_replicas > 1:
             # Multi-GPU: run on each replica and reduce
             per_replica_results = self.strategy.run(
-                self._core_train_step, args=(real_images, class_labels, do_r1, do_pl)
+                self._core_train_step, args=(real_images, class_labels, do_r1_tensor, do_pl_tensor)
             )
             # Reduce results across replicas (average losses)
             disc_loss = self.strategy.reduce(
@@ -300,7 +304,7 @@ class StyleGAN2ADA:
         else:
             # Single GPU: run directly
             disc_loss, r1_penalty, ada_p, gen_loss, pl_penalty = self._core_train_step(
-                real_images, class_labels, do_r1, do_pl
+                real_images, class_labels, do_r1_tensor, do_pl_tensor
             )
 
         # Update metrics
