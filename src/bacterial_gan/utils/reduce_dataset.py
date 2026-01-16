@@ -255,6 +255,172 @@ def reduce_dataset(
     }
 
 
+def reduce_dataset_with_splits(
+    input_dir: Path,
+    output_dir: Path,
+    target_size: int = 5000,
+    train_ratio: float = 0.7,
+    val_ratio: float = 0.15,
+    test_ratio: float = 0.15,
+    random_seed: int = 42,
+    dry_run: bool = False,
+) -> dict:
+    """
+    Reduce dataset while preserving diversity, then split into train/val/test.
+    
+    Args:
+        input_dir: Directory containing images (can have train/val/test subdirs or class subdirs)
+        output_dir: Directory to save reduced dataset with train/val/test splits
+        target_size: Target TOTAL number of images
+        train_ratio: Fraction for training set (default: 0.7)
+        val_ratio: Fraction for validation set (default: 0.15)
+        test_ratio: Fraction for test set (default: 0.15)
+        random_seed: Random seed for reproducibility
+        dry_run: If True, only report what would be done
+        
+    Returns:
+        Dictionary with statistics about the reduction
+    """
+    import random
+    
+    input_dir = Path(input_dir)
+    output_dir = Path(output_dir)
+    
+    # Validate ratios
+    total_ratio = train_ratio + val_ratio + test_ratio
+    if abs(total_ratio - 1.0) > 0.001:
+        print(f"⚠️  Ratios sum to {total_ratio}, normalizing...")
+        train_ratio /= total_ratio
+        val_ratio /= total_ratio
+        test_ratio /= total_ratio
+    
+    # Find all images (from all subdirectories)
+    image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".tiff", ".tif"}
+    image_paths = []
+    
+    for ext in image_extensions:
+        image_paths.extend(input_dir.rglob(f"*{ext}"))
+        image_paths.extend(input_dir.rglob(f"*{ext.upper()}"))
+    
+    image_paths = sorted(set(image_paths))
+    
+    print(f"📊 Found {len(image_paths)} total images in {input_dir}")
+    
+    if len(image_paths) == 0:
+        print("❌ No images found!")
+        return {"original": 0, "reduced": 0}
+    
+    # Determine class from path (handle both train/class and class structures)
+    def get_class_name(path: Path) -> str:
+        # Check if parent is a split folder (train/val/test)
+        parent = path.parent.name
+        grandparent = path.parent.parent.name if path.parent.parent else ""
+        
+        if grandparent in ("train", "val", "test"):
+            return parent  # Class is the direct parent
+        elif parent in ("train", "val", "test"):
+            return "unknown"  # No class subdir
+        else:
+            return parent  # Assume parent is class
+    
+    # Count by class
+    class_counts = {}
+    for path in image_paths:
+        class_name = get_class_name(path)
+        class_counts[class_name] = class_counts.get(class_name, 0) + 1
+    
+    print("📊 Original class distribution:")
+    for class_name, count in sorted(class_counts.items()):
+        print(f"   {class_name}: {count}")
+    
+    # Reduce dataset
+    if len(image_paths) <= target_size:
+        print(f"ℹ️  Dataset already smaller than target ({len(image_paths)} <= {target_size})")
+        selected_paths = image_paths
+    else:
+        # Extract features and cluster
+        features = extract_all_features(image_paths)
+        selected_paths = cluster_and_select(features, image_paths, target_size, random_seed)
+    
+    # Calculate split sizes
+    n_train = int(len(selected_paths) * train_ratio)
+    n_val = int(len(selected_paths) * val_ratio)
+    n_test = len(selected_paths) - n_train - n_val
+    
+    print(f"\n📊 Split sizes (total: {len(selected_paths)}):")
+    print(f"   train: {n_train} ({train_ratio*100:.0f}%)")
+    print(f"   val:   {n_val} ({val_ratio*100:.0f}%)")
+    print(f"   test:  {n_test} ({test_ratio*100:.0f}%)")
+    
+    # Shuffle and split, maintaining class balance as much as possible
+    random.seed(random_seed)
+    
+    # Group by class
+    class_to_paths = {}
+    for path in selected_paths:
+        class_name = get_class_name(path)
+        if class_name not in class_to_paths:
+            class_to_paths[class_name] = []
+        class_to_paths[class_name].append(path)
+    
+    # Shuffle within each class
+    for class_name in class_to_paths:
+        random.shuffle(class_to_paths[class_name])
+    
+    # Stratified split
+    train_paths = []
+    val_paths = []
+    test_paths = []
+    
+    for class_name, paths in class_to_paths.items():
+        n_class = len(paths)
+        n_class_train = int(n_class * train_ratio)
+        n_class_val = int(n_class * val_ratio)
+        
+        train_paths.extend(paths[:n_class_train])
+        val_paths.extend(paths[n_class_train:n_class_train + n_class_val])
+        test_paths.extend(paths[n_class_train + n_class_val:])
+    
+    # Report final distribution
+    def count_classes(paths):
+        counts = {}
+        for p in paths:
+            c = get_class_name(p)
+            counts[c] = counts.get(c, 0) + 1
+        return counts
+    
+    print("\n📊 Final distribution:")
+    for split_name, split_paths in [("train", train_paths), ("val", val_paths), ("test", test_paths)]:
+        print(f"\n   {split_name} ({len(split_paths)} images):")
+        for class_name, count in sorted(count_classes(split_paths).items()):
+            print(f"      {class_name}: {count}")
+    
+    if not dry_run:
+        # Copy files to split directories
+        for split_name, split_paths in [("train", train_paths), ("val", val_paths), ("test", test_paths)]:
+            split_dir = output_dir / split_name
+            print(f"\n📁 Copying {len(split_paths)} images to {split_dir}...")
+            
+            for path in tqdm(split_paths, desc=f"Copying {split_name}"):
+                class_name = get_class_name(path)
+                dest_dir = split_dir / class_name
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest_path = dest_dir / path.name
+                shutil.copy2(path, dest_path)
+        
+        print(f"\n✅ Saved to {output_dir}")
+    else:
+        print("\n🔍 Dry run - no files copied")
+    
+    return {
+        "original": len(image_paths),
+        "reduced": len(selected_paths),
+        "train": len(train_paths),
+        "val": len(val_paths),
+        "test": len(test_paths),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Reduce dataset size while preserving diversity using clustering"

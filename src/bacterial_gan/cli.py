@@ -133,8 +133,14 @@ def reduce_dataset(
     input_dir: str = typer.Argument(..., help="Input directory containing images"),
     output_dir: str = typer.Argument(..., help="Output directory for reduced dataset"),
     target_size: int = typer.Option(
-        default=5000, help="Target number of images in reduced dataset"
+        default=5000, help="Target TOTAL number of images"
     ),
+    with_splits: bool = typer.Option(
+        default=False, help="Create train/val/test splits (70/15/15)"
+    ),
+    train_ratio: float = typer.Option(default=0.7, help="Train split ratio (with --with-splits)"),
+    val_ratio: float = typer.Option(default=0.15, help="Val split ratio (with --with-splits)"),
+    test_ratio: float = typer.Option(default=0.15, help="Test split ratio (with --with-splits)"),
     seed: int = typer.Option(default=42, help="Random seed for reproducibility"),
     dry_run: bool = typer.Option(
         default=False, help="Only report what would be done, don't copy files"
@@ -147,30 +153,59 @@ def reduce_dataset(
     a representative sample of the original dataset.
     
     Examples:
+        # Reduce single folder
         bacterial-gan reduce-dataset data/02_processed/train data/reduced --target-size 5000
-        bacterial-gan reduce-dataset data/02_processed/train data/reduced -n 3000 --dry-run
+        
+        # Reduce entire dataset with train/val/test splits (70/15/15)
+        bacterial-gan reduce-dataset data/02_processed data/reduced --target-size 5000 --with-splits
     """
-    from bacterial_gan.utils.reduce_dataset import reduce_dataset as run_reduce
-    
     typer.echo(f"🔄 Reducing dataset: {input_dir} → {output_dir}")
     typer.echo(f"   Target size: {target_size} images")
     
-    result = run_reduce(
-        input_dir=Path(input_dir),
-        output_dir=Path(output_dir),
-        target_size=target_size,
-        random_seed=seed,
-        dry_run=dry_run,
-    )
-    
-    if result["reduced"] > 0:
-        pct_reduction = (1 - result["reduced"] / result["original"]) * 100
-        typer.secho(
-            f"✅ Reduced: {result['original']} → {result['reduced']} images ({pct_reduction:.1f}% reduction)",
-            fg=typer.colors.GREEN,
+    if with_splits:
+        from bacterial_gan.utils.reduce_dataset import reduce_dataset_with_splits
+        
+        typer.echo(f"   Splits: train={train_ratio*100:.0f}%, val={val_ratio*100:.0f}%, test={test_ratio*100:.0f}%")
+        
+        result = reduce_dataset_with_splits(
+            input_dir=Path(input_dir),
+            output_dir=Path(output_dir),
+            target_size=target_size,
+            train_ratio=train_ratio,
+            val_ratio=val_ratio,
+            test_ratio=test_ratio,
+            random_seed=seed,
+            dry_run=dry_run,
         )
+        
+        if result["reduced"] > 0:
+            typer.secho(
+                f"\n✅ Reduced: {result['original']} → {result['reduced']} images",
+                fg=typer.colors.GREEN,
+            )
+            typer.secho(
+                f"   train: {result['train']}, val: {result['val']}, test: {result['test']}",
+                fg=typer.colors.GREEN,
+            )
     else:
-        typer.secho("❌ No images found or reduction failed", fg=typer.colors.RED)
+        from bacterial_gan.utils.reduce_dataset import reduce_dataset as run_reduce
+        
+        result = run_reduce(
+            input_dir=Path(input_dir),
+            output_dir=Path(output_dir),
+            target_size=target_size,
+            random_seed=seed,
+            dry_run=dry_run,
+        )
+        
+        if result["reduced"] > 0:
+            pct_reduction = (1 - result["reduced"] / result["original"]) * 100
+            typer.secho(
+                f"✅ Reduced: {result['original']} → {result['reduced']} images ({pct_reduction:.1f}% reduction)",
+                fg=typer.colors.GREEN,
+            )
+        else:
+            typer.secho("❌ No images found or reduction failed", fg=typer.colors.RED)
 
 
 if __name__ == "__main__":
