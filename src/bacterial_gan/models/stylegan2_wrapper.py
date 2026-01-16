@@ -7,6 +7,7 @@ Provides high-level training loop with:
 - EMA (Exponential Moving Average) generator for stable inference
 - Mixed precision training with gradient scaling
 - Truncation trick for controlled generation
+- Multi-GPU support with MirroredStrategy
 """
 
 from pathlib import Path
@@ -32,6 +33,7 @@ class StyleGAN2ADA:
     - EMA generator for stable inference
     - Mixed precision training with gradient scaling
     - Truncation trick for quality/diversity control
+    - Multi-GPU training with MirroredStrategy
     """
 
     def __init__(
@@ -57,6 +59,7 @@ class StyleGAN2ADA:
         ema_decay: float = 0.999,
         use_ema: bool = True,
         use_pl_reg: bool = True,
+        use_multi_gpu: bool = True,
     ):
         self.latent_dim = latent_dim
         self.num_classes = num_classes
@@ -75,6 +78,22 @@ class StyleGAN2ADA:
         self.ema_decay = ema_decay
         self.use_pl_reg = use_pl_reg
         self.use_mixed_precision = use_mixed_precision
+        self.use_multi_gpu = use_multi_gpu
+
+        # Setup distribution strategy for multi-GPU training
+        if use_multi_gpu:
+            gpus = tf.config.list_physical_devices('GPU')
+            if len(gpus) > 1:
+                self.strategy = tf.distribute.MirroredStrategy()
+                print(f"✅ Multi-GPU enabled: {len(gpus)} GPUs with MirroredStrategy")
+            else:
+                self.strategy = tf.distribute.get_strategy()
+                if len(gpus) == 1:
+                    print(f"ℹ️  Single GPU detected, using default strategy")
+        else:
+            self.strategy = tf.distribute.get_strategy()
+
+        self.num_replicas = self.strategy.num_replicas_in_sync
 
         if use_mixed_precision:
             keras.mixed_precision.set_global_policy("mixed_float16")
@@ -82,54 +101,56 @@ class StyleGAN2ADA:
 
         print("🏗️  Building StyleGAN2-ADA...")
 
-        models = build_stylegan2_ada(
-            latent_dim=latent_dim,
-            num_classes=num_classes,
-            image_size=image_size,
-            channels=channels,
-            use_simplified=use_simplified,
-            use_ada=use_ada,
-            ada_target=ada_target,
-        )
+        # Build models and optimizers within strategy scope (required for multi-GPU)
+        with self.strategy.scope():
+            models = build_stylegan2_ada(
+                latent_dim=latent_dim,
+                num_classes=num_classes,
+                image_size=image_size,
+                channels=channels,
+                use_simplified=use_simplified,
+                use_ada=use_ada,
+                ada_target=ada_target,
+            )
 
-        self.generator = models["generator"]
-        self.discriminator = models["discriminator"]
+            self.generator = models["generator"]
+            self.discriminator = models["discriminator"]
 
-        self.loss_module = StyleGAN2ADALoss(
-            r1_gamma=r1_gamma,
-            pl_weight=pl_weight,
-            pl_interval=pl_interval,
-            r1_interval=r1_interval,
-        )
+            self.loss_module = StyleGAN2ADALoss(
+                r1_gamma=r1_gamma,
+                pl_weight=pl_weight,
+                pl_interval=pl_interval,
+                r1_interval=r1_interval,
+            )
 
-        self.gen_loss_fn, self.disc_loss_fn = get_loss_functions(loss_type)
+            self.gen_loss_fn, self.disc_loss_fn = get_loss_functions(loss_type)
 
-        # Optimizers (Keras 3 handles mixed precision automatically with policy)
-        self.gen_optimizer = keras.optimizers.Adam(
-            learning_rate=learning_rate_g, beta_1=beta1, beta_2=beta2
-        )
-        self.disc_optimizer = keras.optimizers.Adam(
-            learning_rate=learning_rate_d, beta_1=beta1, beta_2=beta2
-        )
+            # Optimizers (Keras 3 handles mixed precision automatically with policy)
+            self.gen_optimizer = keras.optimizers.Adam(
+                learning_rate=learning_rate_g, beta_1=beta1, beta_2=beta2
+            )
+            self.disc_optimizer = keras.optimizers.Adam(
+                learning_rate=learning_rate_d, beta_1=beta1, beta_2=beta2
+            )
 
-        # Metrics
-        self.gen_loss_metric = keras.metrics.Mean(name="generator_loss")
-        self.disc_loss_metric = keras.metrics.Mean(name="discriminator_loss")
-        self.r1_metric = keras.metrics.Mean(name="r1_penalty")
-        self.pl_metric = keras.metrics.Mean(name="pl_penalty")
-        self.ada_p_metric = keras.metrics.Mean(name="ada_p")
+            # Metrics
+            self.gen_loss_metric = keras.metrics.Mean(name="generator_loss")
+            self.disc_loss_metric = keras.metrics.Mean(name="discriminator_loss")
+            self.r1_metric = keras.metrics.Mean(name="r1_penalty")
+            self.pl_metric = keras.metrics.Mean(name="pl_penalty")
+            self.ada_p_metric = keras.metrics.Mean(name="ada_p")
 
-        self.iteration = tf.Variable(0, trainable=False, dtype=tf.int64)
+            self.iteration = tf.Variable(0, trainable=False, dtype=tf.int64)
 
-        # Path length moving average
-        self.pl_mean = tf.Variable(0.0, trainable=False, dtype=tf.float32)
+            # Path length moving average
+            self.pl_mean = tf.Variable(0.0, trainable=False, dtype=tf.float32)
 
-        self._build_models()
+            self._build_models()
 
-        # EMA generator for stable inference
-        if use_ema:
-            self.generator_ema = ExponentialMovingAverage(self.generator, decay=ema_decay)
-            print(f"✅ EMA enabled (decay={ema_decay})")
+            # EMA generator for stable inference
+            if use_ema:
+                self.generator_ema = ExponentialMovingAverage(self.generator, decay=ema_decay)
+                print(f"✅ EMA enabled (decay={ema_decay})")
 
         print("✅ StyleGAN2-ADA initialized")
         print(f"   Generator: {self.generator.count_params():,} params")
@@ -137,6 +158,8 @@ class StyleGAN2ADA:
         print(f"   Loss: {loss_type}, R1 gamma: {r1_gamma}")
         print(f"   Path Length: {'Enabled' if use_pl_reg else 'Disabled'} (weight={pl_weight})")
         print(f"   ADA: {'Enabled' if use_ada else 'Disabled'}")
+        if self.num_replicas > 1:
+            print(f"   Multi-GPU: {self.num_replicas} replicas")
 
     def _build_models(self):
         """Build models with dummy forward pass."""
@@ -251,10 +274,33 @@ class StyleGAN2ADA:
         do_r1 = (current_iter > 0) and (current_iter % self.r1_interval == 0)
         do_pl = (current_iter > 0) and (current_iter % self.pl_interval == 0)
 
-        # Execute training step
-        disc_loss, r1_penalty, ada_p, gen_loss, pl_penalty = self._core_train_step(
-            real_images, class_labels, do_r1, do_pl
-        )
+        # Execute training step - use strategy.run() for multi-GPU
+        if self.num_replicas > 1:
+            # Multi-GPU: run on each replica and reduce
+            per_replica_results = self.strategy.run(
+                self._core_train_step, args=(real_images, class_labels, do_r1, do_pl)
+            )
+            # Reduce results across replicas (average losses)
+            disc_loss = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[0], axis=None
+            )
+            r1_penalty = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[1], axis=None
+            )
+            ada_p = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[2], axis=None
+            )
+            gen_loss = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[3], axis=None
+            )
+            pl_penalty = self.strategy.reduce(
+                tf.distribute.ReduceOp.MEAN, per_replica_results[4], axis=None
+            )
+        else:
+            # Single GPU: run directly
+            disc_loss, r1_penalty, ada_p, gen_loss, pl_penalty = self._core_train_step(
+                real_images, class_labels, do_r1, do_pl
+            )
 
         # Update metrics
         self.disc_loss_metric.update_state(disc_loss)

@@ -140,6 +140,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             use_ema=settings.training.use_ema,
             ema_decay=settings.training.ema_decay,
             use_pl_reg=settings.training.use_pl_reg,
+            use_multi_gpu=settings.training.memory_optimization.use_multi_gpu,
         )
         print()
 
@@ -189,6 +190,11 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                 image_size=settings.training.image_size,
             )
             num_batches = settings.training.dummy_num_batches
+
+        # Distribute dataset for multi-GPU training
+        if gan.num_replicas > 1:
+            train_dataset = gan.strategy.experimental_distribute_dataset(train_dataset)
+            print(f"📊 Dataset distributed across {gan.num_replicas} GPUs")
 
         print()
 

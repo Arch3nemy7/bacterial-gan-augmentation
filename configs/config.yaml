@@ -153,6 +153,8 @@ training:
     dataset_prefetch_buffer: -1 # -1 = auto
     dataset_cache_in_memory: false
     dataset_cache_filename: null
+    # Multi-GPU: Distributes training across all available GPUs using MirroredStrategy
+    use_multi_gpu: true # Set to true for 2x RTX 4070
     # Gradient checkpointing: Trade compute for memory (slower but less VRAM)
     gradient_checkpointing: false
 
