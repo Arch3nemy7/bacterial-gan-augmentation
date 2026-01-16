@@ -201,43 +201,49 @@ class ModulatedConv2D(layers.Layer):
         # Style modulation: compute per-sample modulation factors
         s = self.style_dense(style)  # [B, C_in]
 
-        # Scale base weight and apply style modulation
+        # Scale base weight
         w = self.weight * self.wscale  # [k, k, C_in, C_out]
-        # Modulate: w_mod[b, k1, k2, c_in, c_out] = w[k1, k2, c_in, c_out] * s[b, c_in]
-        w = w[tf.newaxis, ...] * s[:, tf.newaxis, tf.newaxis, :, tf.newaxis]
-        # w shape: [B, k, k, C_in, C_out]
 
+        # Memory-efficient approach: modulate input instead of weights
+        # This avoids creating per-sample weight tensors [B, k, k, C_in, C_out]
+        
+        # Reshape style to broadcast over spatial dimensions: [B, 1, 1, C_in]
+        s_spatial = s[:, tf.newaxis, tf.newaxis, :]
+        
+        # Modulate input by style: x_mod = x * s
+        x_mod = x * s_spatial
+        
         if self.demodulate:
-            # Demodulation: normalize by L2 norm across spatial and input channels
-            sigma = tf.sqrt(tf.reduce_sum(tf.square(w), axis=[1, 2, 3]) + 1e-8)  # [B, C_out]
-            w = w / sigma[:, tf.newaxis, tf.newaxis, tf.newaxis, :]
-
-        # Vectorized convolution using im2col + einsum approach
-        # Extract image patches: [B, H, W, k*k*C_in]
-        patches = tf.image.extract_patches(
-            images=x,
-            sizes=[1, self.kernel_size, self.kernel_size, 1],
-            strides=[1, 1, 1, 1],
-            rates=[1, 1, 1, 1],
-            padding="SAME",
-        )
-
-        # Reshape patches for einsum: [B, H, W, k*k, C_in]
-        patches = tf.reshape(
-            patches,
-            [batch_size, height, width, self.kernel_size * self.kernel_size, in_channels],
-        )
-
-        # Reshape weights for einsum: [B, k*k, C_in, C_out]
-        w_reshaped = tf.reshape(
-            w,
-            [batch_size, self.kernel_size * self.kernel_size, in_channels, self.filters],
-        )
-
-        # Efficient batched convolution via einsum
-        # patches: [B, H, W, k*k, C_in], w_reshaped: [B, k*k, C_in, C_out]
-        # output: [B, H, W, C_out]
-        output = tf.einsum("bhwkc,bkco->bhwo", patches, w_reshaped)
+            # Compute demodulation factor from weights and styles
+            # d = 1 / sqrt(sum_k,c_in (w * s)^2)
+            # Since we modulated the input, we need to compute the scaling factor
+            # w_mod = w * s, demod = 1/||w_mod||
+            # This is mathematically equivalent but computed differently
+            
+            # Weight squared: [k, k, C_in, C_out]
+            w_sq = tf.square(w)
+            # Style squared: [B, C_in]
+            s_sq = tf.square(s)
+            
+            # Sum over k, k, C_in: [B, C_out] = sum([B, 1, 1, C_in, 1] * [1, k, k, C_in, C_out])
+            # Broadcast: w_sq[k, k, C_in, C_out] with s_sq[B, C_in]
+            # Result: [B, C_out]
+            demod = tf.sqrt(
+                tf.reduce_sum(
+                    w_sq[tf.newaxis, :, :, :, :] * s_sq[:, tf.newaxis, tf.newaxis, :, tf.newaxis],
+                    axis=[1, 2, 3]
+                ) + 1e-8
+            )  # [B, C_out]
+            
+            # Apply demodulation as post-convolution scaling
+            demod = 1.0 / demod  # [B, C_out]
+        
+        # Standard convolution with shared weights
+        output = tf.nn.conv2d(x_mod, w, strides=[1, 1, 1, 1], padding="SAME")
+        
+        if self.demodulate:
+            # Apply demodulation factor: output * demod[B, 1, 1, C_out]
+            output = output * demod[:, tf.newaxis, tf.newaxis, :]
 
         return output
 
