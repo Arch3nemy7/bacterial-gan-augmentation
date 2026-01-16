@@ -2,7 +2,7 @@
 # Bacterial GAN Augmentation Configuration
 # =============================================================================
 # This file contains all settings for training StyleGAN2-ADA on bacterial images.
-# 
+#
 # QUICK START - Choose your image size:
 #   - 128x128: Faster training, lower VRAM, good for GTX 1650 (4GB)
 #   - 256x256: Better quality, needs 8GB+ VRAM
@@ -18,9 +18,9 @@ app:
 # DATA DIRECTORIES
 # =============================================================================
 data:
-  raw_data_dir: "data/01_raw"              # Source images (gram_positive/, gram_negative/)
-  processed_data_dir: "data/02_processed"  # Preprocessed images (train/, val/, test/)
-  synthetic_data_dir: "data/03_synthetic"  # Generated images output
+  raw_data_dir: "data/01_raw" # Source images (gram_positive/, gram_negative/)
+  processed_data_dir: "data/02_processed" # Preprocessed images (train/, val/, test/)
+  synthetic_data_dir: "data/03_synthetic" # Generated images output
   expert_testing_set_path: "data/04_expert_testing"
 
 # =============================================================================
@@ -28,7 +28,6 @@ data:
 # =============================================================================
 # Run with: poetry run python -m bacterial_gan preprocess
 preprocessing:
-  
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ PREPROCESS MODE                                                         │
   # │   'none'   - Keep original size (no processing)                         │
@@ -37,19 +36,19 @@ preprocessing:
   # │   'center' - Center crop to image_size x image_size                     │
   # │   'random' - Random crop to image_size x image_size                     │
   # └─────────────────────────────────────────────────────────────────────────┘
-  preprocess_mode: "patch"
-  
+  preprocess_mode: "resize"
+
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ IMAGE SIZE - Set this to match training.image_size                      │
   # │   128 = GTX 1650 (4GB), faster training                                 │
   # │   256 = RTX 3060+ (8GB+), better quality                                │
   # └─────────────────────────────────────────────────────────────────────────┘
   image_size: 256
-  
-  apply_augmentation: false     # Augmentation is done during training, not here
-  bg_threshold: 0.9             # For patch extraction: skip if >90% white
-  max_patches_per_split: null   # null = no limit
-  
+
+  apply_augmentation: false # Augmentation is done during training, not here
+  bg_threshold: 0.9 # For patch extraction: skip if >90% white
+  max_patches_per_split: null # null = no limit
+
   train_ratio: 0.7
   val_ratio: 0.15
   test_ratio: 0.15
@@ -63,8 +62,8 @@ training:
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ ARCHITECTURE                                                            │
   # └─────────────────────────────────────────────────────────────────────────┘
-  use_simplified: false          # true = works on 4GB VRAM, false = needs 8GB+
-  
+  use_simplified: false # true = works on 4GB VRAM, false = needs 8GB+
+
   # IMAGE SIZE - Must match preprocessing.image_size!
   # ┌──────────┬────────────┬─────────────┬──────────────────────────────┐
   # │ Size     │ VRAM/GPU   │ Batch Size  │ Recommended GPU              │
@@ -82,10 +81,10 @@ training:
   #   4. Use simplified architecture: use_simplified: true
   #   5. Reduce image_size (256 -> 128)
   image_size: 256
-  
-  num_classes: 2                # 2 = gram_positive, gram_negative
-  channels: 3                   # RGB
-  latent_dim: 256               # Size of random noise input (128-512)
+
+  num_classes: 2 # 2 = gram_positive, gram_negative
+  channels: 3 # RGB
+  latent_dim: 256 # Size of random noise input (128-512)
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ TRAINING PARAMETERS                                                     │
@@ -96,74 +95,72 @@ training:
   #   - 256x256 on 2x RTX 4070S: batch_size=4 (effective=8 with multi-GPU)
   batch_size: 4
   epochs: 300
-  
+
   # Learning rates (default StyleGAN2 values work well)
   learning_rate_g: 0.0002
   learning_rate_d: 0.0002
   beta1: 0.0
   beta2: 0.99
-  n_critic: 1                   # D updates per G update
+  n_critic: 1 # D updates per G update
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ LOSS & REGULARIZATION                                                   │
   # └─────────────────────────────────────────────────────────────────────────┘
-  loss_type: "stylegan2"        # 'stylegan2' or 'wgan-gp'
+  loss_type: "stylegan2" # 'stylegan2' or 'wgan-gp'
 
   # R1 Regularization (stabilizes discriminator)
   r1_gamma: 10.0
-  r1_interval: 16               # Apply every N batches (lazy regularization)
+  r1_interval: 16 # Apply every N batches (lazy regularization)
 
   # Path Length Regularization (smoother latent space)
   pl_weight: 2.0
-  pl_interval: 4                # Apply every N batches (lazy regularization)
-  use_pl_reg: true              # Enable path length regularization
+  pl_interval: 4 # Apply every N batches (lazy regularization)
+  use_pl_reg: true # Enable path length regularization
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ ADAPTIVE DISCRIMINATOR AUGMENTATION (ADA)                               │
   # └─────────────────────────────────────────────────────────────────────────┘
-  use_ada: true                 # Prevents overfitting on small datasets
-  ada_target: 0.6               # Target: 60% of D outputs are "real-looking"
+  use_ada: true # Prevents overfitting on small datasets
+  ada_target: 0.6 # Target: 60% of D outputs are "real-looking"
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ EMA (EXPONENTIAL MOVING AVERAGE)                                        │
   # └─────────────────────────────────────────────────────────────────────────┘
   # EMA maintains a smoothed copy of generator weights for stable inference
-  use_ema: true                 # Highly recommended for better FID scores
-  ema_decay: 0.999              # Higher = smoother (0.999-0.9999)
+  use_ema: true # Highly recommended for better FID scores
+  ema_decay: 0.999 # Higher = smoother (0.999-0.9999)
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ STYLE MIXING & TRUNCATION                                               │
   # └─────────────────────────────────────────────────────────────────────────┘
   # Style mixing: use two different latent vectors during training
-  style_mixing_prob: 0.9        # 90% of batches use style mixing
+  style_mixing_prob: 0.9 # 90% of batches use style mixing
 
   # Truncation trick: control diversity vs. quality at generation time
-  truncation_psi: 0.7           # 0 = average face, 1 = full diversity
+  truncation_psi: 0.7 # 0 = average face, 1 = full diversity
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ PERFORMANCE & MEMORY                                                    │
   # └─────────────────────────────────────────────────────────────────────────┘
   # Mixed precision: Uses FP16 for faster training and ~50% less memory
-  use_mixed_precision: true     # HIGHLY RECOMMENDED for RTX cards
+  use_mixed_precision: false # HIGHLY RECOMMENDED for RTX cards
 
   memory_optimization:
-    gpu_memory_growth: true     # true = allocate only what's needed
-    gpu_memory_limit_mb: null   # null = use all available, or set limit (e.g., 3500)
+    gpu_memory_growth: true # true = allocate only what's needed
+    gpu_memory_limit_mb: null # null = use all available, or set limit (e.g., 3500)
     cpu_threads: null
-    enable_xla: false           # XLA compilation (experimental)
+    enable_xla: false # XLA compilation (experimental)
     dataset_prefetch_buffer: -1 # -1 = auto
     dataset_cache_in_memory: false
     dataset_cache_filename: null
-    # Multi-GPU: Distributes model across all GPUs for more memory
-    use_multi_gpu: true         # Enable for 2x RTX 4070S
     # Gradient checkpointing: Trade compute for memory (slower but less VRAM)
     gradient_checkpointing: false
 
   # ┌─────────────────────────────────────────────────────────────────────────┐
   # │ CHECKPOINTING & SAMPLING                                                │
   # └─────────────────────────────────────────────────────────────────────────┘
-  checkpoint_interval: 50       # Save model every N epochs
-  sample_interval: 10           # Generate sample images every N epochs
+  checkpoint_interval: 50 # Save model every N epochs
+  sample_interval: 10 # Generate sample images every N epochs
   num_samples_during_training: 2
   num_samples_final: 8
   num_samples_grid: 16
@@ -172,7 +169,7 @@ training:
   # │ MLFLOW TRACKING                                                         │
   # └─────────────────────────────────────────────────────────────────────────┘
   mlflow_experiment_name: "Bacterial GAN Augmentation"
-  mlflow_tracking_uri: ""       # Empty = local ./mlruns directory
+  mlflow_tracking_uri: "" # Empty = local ./mlruns directory
 
   # Testing only
   dummy_num_batches: 10

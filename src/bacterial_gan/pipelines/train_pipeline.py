@@ -77,7 +77,7 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
 
     print("🔧 Configuring TensorFlow...")
     configure_tensorflow_memory()
-    configure_cpu_parallelism(num_threads=12)
+    configure_cpu_parallelism(num_threads=settings.training.memory_optimization.cpu_threads)
     enable_xla_compilation(enable=settings.training.memory_optimization.enable_xla)
     clear_session()
     print()
@@ -140,7 +140,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
             use_ema=settings.training.use_ema,
             ema_decay=settings.training.ema_decay,
             use_pl_reg=settings.training.use_pl_reg,
-            use_multi_gpu=settings.training.memory_optimization.use_multi_gpu,
         )
         print()
 
@@ -164,7 +163,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
         print("📂 Loading dataset...")
         processed_data_path = Path(settings.data.processed_data_dir) / "train"
 
-        # For multi-GPU, use per-replica batch size (total = batch_size * num_gpus)
         batch_size = settings.training.batch_size
 
         train_dataset = None
@@ -191,11 +189,6 @@ def run(settings: Settings, resume_from_checkpoint: Optional[str] = None):
                 image_size=settings.training.image_size,
             )
             num_batches = settings.training.dummy_num_batches
-
-        # Distribute dataset for multi-GPU training
-        if gan.num_replicas > 1:
-            train_dataset = gan.strategy.experimental_distribute_dataset(train_dataset)
-            print(f"📊 Dataset distributed across {gan.num_replicas} GPUs")
 
         print()
 
