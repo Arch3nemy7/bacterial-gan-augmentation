@@ -248,10 +248,11 @@ class StyleGAN2ADA:
 
         return gen_loss, pl_penalty
 
+    @tf.function
     def _core_train_step(
         self, real_images: tf.Tensor, class_labels: tf.Tensor, do_r1: bool, do_pl: bool
     ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        """Core training step logic."""
+        """Core training step logic (compiled with tf.function for performance)."""
         batch_size = tf.shape(real_images)[0]
 
         # Handle NaN values
