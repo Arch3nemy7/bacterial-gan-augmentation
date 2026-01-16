@@ -171,7 +171,7 @@ class StyleGAN2ADA:
         _ = self.discriminator([dummy_images, dummy_labels], training=False)
 
     def train_discriminator_step(
-        self, real_images: tf.Tensor, class_labels: tf.Tensor, do_r1: bool
+        self, real_images: tf.Tensor, class_labels: tf.Tensor, do_r1: tf.Tensor
     ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
         batch_size = tf.shape(real_images)[0]
         noise = tf.random.normal([batch_size, self.latent_dim])
@@ -187,12 +187,20 @@ class StyleGAN2ADA:
 
             disc_loss = self.disc_loss_fn(real_logits_f32, fake_logits_f32)
 
-            r1_penalty = tf.constant(0.0, dtype=tf.float32)
-            if do_r1:
-                r1_penalty = r1_regularization(
+            # R1 regularization using tf.cond for graph compatibility
+            def compute_r1():
+                return r1_regularization(
                     self.discriminator, real_images, class_labels, gamma=self.r1_gamma
                 )
-                disc_loss = disc_loss + r1_penalty * tf.cast(self.r1_interval, tf.float32)
+            
+            def skip_r1():
+                return tf.constant(0.0, dtype=tf.float32)
+            
+            r1_penalty = tf.cond(do_r1, compute_r1, skip_r1)
+            
+            # Scale R1 penalty by interval for lazy regularization
+            r1_scaled = r1_penalty * tf.cast(self.r1_interval, tf.float32)
+            disc_loss = disc_loss + tf.cond(do_r1, lambda: r1_scaled, lambda: tf.constant(0.0, dtype=tf.float32))
 
         # Compute gradients (Keras handles scaling automatically)
         gradients = tape.gradient(disc_loss, self.discriminator.trainable_variables)
@@ -210,7 +218,7 @@ class StyleGAN2ADA:
         return disc_loss, r1_penalty, ada_p
 
     def train_generator_step(
-        self, batch_size: int, class_labels: tf.Tensor, do_pl: bool
+        self, batch_size: int, class_labels: tf.Tensor, do_pl: tf.Tensor
     ) -> Tuple[tf.Tensor, tf.Tensor]:
         noise = tf.random.normal([batch_size, self.latent_dim])
 
@@ -223,17 +231,31 @@ class StyleGAN2ADA:
             gen_loss = self.gen_loss_fn(fake_logits_f32)
 
             # Path length regularization (lazy - every pl_interval steps)
+            # Initialize with defaults for tf.cond compatibility
             pl_penalty = tf.constant(0.0, dtype=tf.float32)
-            if do_pl and self.use_pl_reg:
-                pl_penalty, new_pl_mean = path_length_regularization(
+            new_pl_mean = self.pl_mean  # Default to current value
+            
+            # Use tf.cond for graph-compatible conditional execution
+            should_do_pl = tf.logical_and(do_pl, tf.constant(self.use_pl_reg, dtype=tf.bool))
+            
+            def compute_pl():
+                penalty, mean = path_length_regularization(
                     self.generator,
                     noise,
                     class_labels,
                     pl_mean=self.pl_mean,
                     pl_weight=self.pl_weight,
                 )
-                # Scale by interval for lazy regularization
-                gen_loss = gen_loss + pl_penalty * tf.cast(self.pl_interval, tf.float32)
+                return penalty, mean
+            
+            def skip_pl():
+                return tf.constant(0.0, dtype=tf.float32), self.pl_mean
+            
+            pl_penalty, new_pl_mean = tf.cond(should_do_pl, compute_pl, skip_pl)
+            
+            # Scale by interval for lazy regularization (only when doing PL)
+            pl_scaled = pl_penalty * tf.cast(self.pl_interval, tf.float32)
+            gen_loss = gen_loss + tf.cond(should_do_pl, lambda: pl_scaled, lambda: tf.constant(0.0, dtype=tf.float32))
 
         # Compute gradients (Keras handles scaling automatically)
         gradients = tape.gradient(gen_loss, self.generator.trainable_variables)
@@ -242,9 +264,8 @@ class StyleGAN2ADA:
         gradients, _ = tf.clip_by_global_norm(gradients, 1.0)
         self.gen_optimizer.apply_gradients(zip(gradients, self.generator.trainable_variables))
 
-        # Update path length moving average
-        if do_pl and self.use_pl_reg:
-            self.pl_mean.assign(new_pl_mean)
+        # Update path length moving average (always assign, new_pl_mean is unchanged if skipped)
+        self.pl_mean.assign(new_pl_mean)
 
         return gen_loss, pl_penalty
 
