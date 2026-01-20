@@ -268,7 +268,7 @@ if [ "$HAS_NVIDIA_GPU" = true ]; then
     echo ""
     echo "📦 Installing TensorFlow with GPU support..."
     echo "   This includes CUDA and cuDNN libraries (~500MB download)"
-    echo "   Target: tensorflow[and-cuda]==2.15.0"
+    echo "   Note: Using TensorFlow 2.17 (better Python 3.11 compatibility)"
 
     # Upgrade pip first
     .venv/bin/pip install --upgrade pip setuptools wheel
@@ -282,15 +282,32 @@ if [ "$HAS_NVIDIA_GPU" = true ]; then
         scikit-image scikit-learn pandas pyyaml python-dotenv dvc typer tqdm
 
     # Install GPU-enabled TensorFlow
-    .venv/bin/pip install "tensorflow[and-cuda]==2.15.0"
+    # Python 3.11 + TensorFlow + GPU is tricky. Try multiple approaches:
 
-    TENSORFLOW_TYPE="GPU-enabled"
+    # Option 1: nvidia-tensorflow (NVIDIA's official build)
+    echo "   Trying nvidia-tensorflow (recommended for Python 3.11)..."
+    if .venv/bin/pip install --extra-index-url https://pypi.nvidia.com nvidia-tensorflow[horovod]==2.15.0 2>&1 | tee /tmp/tf_install.log | grep -q "Successfully installed"; then
+        TENSORFLOW_TYPE="GPU-enabled (nvidia-tensorflow 2.15)"
+        echo "   ✅ nvidia-tensorflow installed"
+    else
+        # Option 2: Plain TensorFlow 2.17 (will use system CUDA if available)
+        echo "   Trying tensorflow 2.17 (uses system CUDA)..."
+        if .venv/bin/pip install tensorflow==2.17.0 2>&1 | tee /tmp/tf_install.log | grep -q "Successfully installed"; then
+            TENSORFLOW_TYPE="GPU-enabled (TF 2.17, system CUDA)"
+            echo "   ✅ TensorFlow 2.17 installed"
+        else
+            # Option 3: TensorFlow 2.16
+            echo "   Trying tensorflow 2.16..."
+            .venv/bin/pip install tensorflow==2.16.1
+            TENSORFLOW_TYPE="GPU-enabled (TF 2.16, system CUDA)"
+        fi
+    fi
 
 elif [ "$IS_QEMU" = true ]; then
     echo ""
     echo "⚠️  QEMU Virtual CPU detected without GPU"
     echo "📦 Installing CPU-only TensorFlow (compatible with QEMU)..."
-    echo "   Target: tensorflow-cpu==2.15.0"
+    echo "   Target: tensorflow-cpu==2.17.0"
 
     # Upgrade pip first
     .venv/bin/pip install --upgrade pip setuptools wheel
@@ -304,7 +321,7 @@ elif [ "$IS_QEMU" = true ]; then
         scikit-image scikit-learn pandas pyyaml python-dotenv dvc typer tqdm
 
     # Install CPU-only TensorFlow
-    .venv/bin/pip install tensorflow-cpu==2.15.0
+    .venv/bin/pip install tensorflow-cpu==2.17.0
 
     TENSORFLOW_TYPE="CPU-only (QEMU compatible)"
 
