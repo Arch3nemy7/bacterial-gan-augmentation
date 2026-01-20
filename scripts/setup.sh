@@ -242,43 +242,75 @@ fi
 
 echo ""
 echo "✅ Verifying GPU detection..."
+echo "   (This may take 15-30 seconds on virtual CPUs...)"
 if [ -f ".venv/bin/python" ]; then
-    # Use venv Python directly
-    if .venv/bin/python -c "import tensorflow as tf; gpus = tf.config.list_physical_devices('GPU'); print('GPU available:', len(gpus) > 0); print('GPU devices:', gpus); exit(0 if len(gpus) > 0 else 1)" 2>/dev/null; then
+    # Use venv Python directly with timeout
+    if timeout 60s .venv/bin/python -c "import tensorflow as tf; gpus = tf.config.list_physical_devices('GPU'); print('GPU available:', len(gpus) > 0); print('GPU devices:', gpus); exit(0 if len(gpus) > 0 else 1)" 2>/dev/null; then
         echo "✅ GPU detected successfully!"
     else
-        echo "⚠️  No GPU detected. Training will use CPU (much slower)."
-        echo "    If you have an NVIDIA GPU, ensure drivers are installed:"
-        echo "    nvidia-smi should show your GPU"
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 124 ]; then
+            echo "⚠️  GPU detection timed out (>60s). This is common on virtual CPUs."
+            echo "    Skipping GPU check. Training will use available hardware."
+        else
+            echo "⚠️  No GPU detected. Training will use CPU (much slower)."
+            echo "    If you have an NVIDIA GPU, ensure drivers are installed:"
+            echo "    nvidia-smi should show your GPU"
+        fi
     fi
 else
-    # Use Poetry
-    if $POETRY_CMD run python -c "import tensorflow as tf; gpus = tf.config.list_physical_devices('GPU'); print('GPU available:', len(gpus) > 0); print('GPU devices:', gpus); exit(0 if len(gpus) > 0 else 1)" 2>/dev/null; then
+    # Use Poetry with timeout
+    if timeout 60s $POETRY_CMD run python -c "import tensorflow as tf; gpus = tf.config.list_physical_devices('GPU'); print('GPU available:', len(gpus) > 0); print('GPU devices:', gpus); exit(0 if len(gpus) > 0 else 1)" 2>/dev/null; then
         echo "✅ GPU detected successfully!"
     else
-        echo "⚠️  No GPU detected. Training will use CPU (much slower)."
-        echo "    If you have an NVIDIA GPU, ensure drivers are installed:"
-        echo "    nvidia-smi should show your GPU"
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 124 ]; then
+            echo "⚠️  GPU detection timed out (>60s). This is common on virtual CPUs."
+            echo "    Skipping GPU check. Training will use available hardware."
+        else
+            echo "⚠️  No GPU detected. Training will use CPU (much slower)."
+            echo "    If you have an NVIDIA GPU, ensure drivers are installed:"
+            echo "    nvidia-smi should show your GPU"
+        fi
     fi
 fi
 
 echo ""
 echo "✅ Verifying CLI..."
+echo "   (This may take 15-30 seconds on virtual CPUs due to TensorFlow import...)"
 if [ -f ".venv/bin/bacterial-gan" ]; then
-    # Use venv CLI directly
-    if .venv/bin/bacterial-gan --help &> /dev/null; then
+    # Use venv CLI directly with increased timeout
+    if timeout 90s .venv/bin/bacterial-gan --help &> /dev/null; then
         echo "✅ 'bacterial-gan' CLI is ready."
     else
-        echo "❌ CLI check failed. Something went wrong."
-        exit 1
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 124 ]; then
+            echo "⚠️  CLI verification timed out (>90s)."
+            echo "    This is common on virtual CPUs. The CLI should still work, just slowly."
+            echo "    Try running manually: .venv/bin/bacterial-gan --help"
+        else
+            echo "❌ CLI check failed with exit code $EXIT_CODE."
+            echo "    Try running manually to see the error:"
+            echo "    .venv/bin/bacterial-gan --help"
+            exit 1
+        fi
     fi
 else
-    # Use Poetry
-    if $POETRY_CMD run bacterial-gan --help &> /dev/null; then
+    # Use Poetry with increased timeout
+    if timeout 90s $POETRY_CMD run bacterial-gan --help &> /dev/null; then
         echo "✅ 'bacterial-gan' CLI is ready."
     else
-        echo "❌ CLI check failed. Something went wrong."
-        exit 1
+        EXIT_CODE=$?
+        if [ $EXIT_CODE -eq 124 ]; then
+            echo "⚠️  CLI verification timed out (>90s)."
+            echo "    This is common on virtual CPUs. The CLI should still work, just slowly."
+            echo "    Try running manually: $POETRY_CMD run bacterial-gan --help"
+        else
+            echo "❌ CLI check failed with exit code $EXIT_CODE."
+            echo "    Try running manually to see the error:"
+            echo "    $POETRY_CMD run bacterial-gan --help"
+            exit 1
+        fi
     fi
 fi
 
