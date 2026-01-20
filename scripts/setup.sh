@@ -32,14 +32,12 @@ fi
 
 echo "Detected OS: $OS"
 
-# Check if running on QEMU virtual CPU
+# Check if running on QEMU virtual CPU (will determine TensorFlow version later)
 IS_QEMU=false
 if grep -q "QEMU" /proc/cpuinfo 2>/dev/null; then
     IS_QEMU=true
-    echo "⚠️  QEMU Virtual CPU detected!"
-    echo "    TensorFlow may not work with pre-built wheels."
-    echo "    If you get 'Illegal instruction' errors, run:"
-    echo "    ./scripts/fix_tensorflow_qemu.sh"
+    echo "⚠️  QEMU Virtual CPU detected"
+    echo "    Setup will automatically install compatible TensorFlow version"
 fi
 echo ""
 
@@ -228,27 +226,102 @@ $POETRY_CMD env use "$PYENV_PYTHON_PATH" || {
 }
 
 echo ""
-echo "📦 Installing Python dependencies..."
-echo "   (This includes TensorFlow with CUDA support as defined in pyproject.toml)"
+echo "============================================="
+echo "Installing Python Dependencies"
+echo "============================================="
+echo ""
 
 # Verify the venv was created with the correct Python
 if [ -f ".venv/bin/python" ]; then
     VENV_PYTHON_VERSION=$(.venv/bin/python --version 2>&1 | awk '{print $2}')
     echo "   Virtual environment Python version: $VENV_PYTHON_VERSION"
 
-    if [[ "$VENV_PYTHON_VERSION" =~ ^3\.11\. ]]; then
-        # Activate the venv and install with pip as a fallback
-        echo "   Installing dependencies using pip in venv..."
-        .venv/bin/pip install --upgrade pip setuptools wheel
-        .venv/bin/pip install -e .
-    else
+    if [[ ! "$VENV_PYTHON_VERSION" =~ ^3\.11\. ]]; then
         echo "❌ ERROR: Virtual environment has wrong Python version: $VENV_PYTHON_VERSION"
         exit 1
     fi
 else
-    # Try Poetry install
-    $POETRY_CMD install
+    echo "❌ ERROR: Virtual environment not created"
+    exit 1
 fi
+
+# Check if NVIDIA GPU is available
+HAS_NVIDIA_GPU=false
+GPU_NAME=""
+CUDA_VERSION=""
+
+echo "🔍 Checking for NVIDIA GPU..."
+if command -v nvidia-smi &> /dev/null; then
+    if nvidia-smi &> /dev/null; then
+        HAS_NVIDIA_GPU=true
+        GPU_NAME=$(nvidia-smi --query-gpu=gpu_name --format=csv,noheader 2>/dev/null | head -1)
+        CUDA_VERSION=$(nvidia-smi | grep "CUDA Version" | awk '{print $9}')
+        echo "✅ NVIDIA GPU detected: $GPU_NAME"
+        echo "   CUDA Runtime: $CUDA_VERSION"
+    fi
+else
+    echo "⚠️  nvidia-smi not found - no NVIDIA GPU available"
+fi
+
+# Decide which TensorFlow version to install
+if [ "$HAS_NVIDIA_GPU" = true ]; then
+    echo ""
+    echo "📦 Installing TensorFlow with GPU support..."
+    echo "   This includes CUDA and cuDNN libraries (~500MB download)"
+    echo "   Target: tensorflow[and-cuda]==2.15.0"
+
+    # Upgrade pip first
+    .venv/bin/pip install --upgrade pip setuptools wheel
+
+    # Install base dependencies without TensorFlow
+    .venv/bin/pip install -e . --no-deps
+
+    # Install dependencies except TensorFlow
+    .venv/bin/pip install numpy pillow mlflow fastapi uvicorn python-multipart \
+        pydantic pydantic-settings celery redis opencv-python-headless \
+        scikit-image scikit-learn pandas pyyaml python-dotenv dvc typer tqdm
+
+    # Install GPU-enabled TensorFlow
+    .venv/bin/pip install "tensorflow[and-cuda]==2.15.0"
+
+    TENSORFLOW_TYPE="GPU-enabled"
+
+elif [ "$IS_QEMU" = true ]; then
+    echo ""
+    echo "⚠️  QEMU Virtual CPU detected without GPU"
+    echo "📦 Installing CPU-only TensorFlow (compatible with QEMU)..."
+    echo "   Target: tensorflow-cpu==2.15.0"
+
+    # Upgrade pip first
+    .venv/bin/pip install --upgrade pip setuptools wheel
+
+    # Install base dependencies without TensorFlow
+    .venv/bin/pip install -e . --no-deps
+
+    # Install dependencies except TensorFlow
+    .venv/bin/pip install numpy pillow mlflow fastapi uvicorn python-multipart \
+        pydantic pydantic-settings celery redis opencv-python-headless \
+        scikit-image scikit-learn pandas pyyaml python-dotenv dvc typer tqdm
+
+    # Install CPU-only TensorFlow
+    .venv/bin/pip install tensorflow-cpu==2.15.0
+
+    TENSORFLOW_TYPE="CPU-only (QEMU compatible)"
+
+else
+    echo ""
+    echo "📦 Installing standard dependencies (no GPU detected)..."
+
+    # Upgrade pip first
+    .venv/bin/pip install --upgrade pip setuptools wheel
+
+    # Standard installation
+    .venv/bin/pip install -e .
+
+    TENSORFLOW_TYPE="standard"
+fi
+
+echo "✅ Dependencies installed"
 
 echo ""
 echo "✅ Verifying GPU detection..."
@@ -298,14 +371,14 @@ if [ -f ".venv/bin/bacterial-gan" ]; then
     else
         if [ $EXIT_CODE -eq 132 ] || echo "$CLI_OUTPUT" | grep -q "Illegal instruction"; then
             echo "❌ Illegal instruction error detected!"
-            echo "    Your CPU doesn't support the instructions TensorFlow was compiled with."
+            echo "    This should not happen - setup installed wrong TensorFlow version."
             echo ""
-            echo "    Fix: Run this command to install compatible TensorFlow:"
-            echo "    ./scripts/fix_tensorflow_qemu.sh"
+            echo "    Debug info:"
+            echo "    - IS_QEMU: $IS_QEMU"
+            echo "    - HAS_NVIDIA_GPU: $HAS_NVIDIA_GPU"
+            echo "    - TENSORFLOW_TYPE: $TENSORFLOW_TYPE"
             echo ""
-            if [ "$IS_QEMU" = true ]; then
-                echo "    (This is expected on QEMU virtual CPUs)"
-            fi
+            echo "    Please report this issue with the above info."
             exit 1
         elif [ $EXIT_CODE -eq 124 ]; then
             echo "⚠️  CLI verification timed out (>90s)."
@@ -313,8 +386,10 @@ if [ -f ".venv/bin/bacterial-gan" ]; then
             echo "    Try running manually: .venv/bin/bacterial-gan --help"
         else
             echo "❌ CLI check failed with exit code $EXIT_CODE."
-            echo "    Try running manually to see the error:"
-            echo "    .venv/bin/bacterial-gan --help"
+            echo "    Output:"
+            echo "$CLI_OUTPUT" | head -20
+            echo ""
+            echo "    Try running manually: .venv/bin/bacterial-gan --help"
             exit 1
         fi
     fi
@@ -328,14 +403,14 @@ else
     else
         if [ $EXIT_CODE -eq 132 ] || echo "$CLI_OUTPUT" | grep -q "Illegal instruction"; then
             echo "❌ Illegal instruction error detected!"
-            echo "    Your CPU doesn't support the instructions TensorFlow was compiled with."
+            echo "    This should not happen - setup installed wrong TensorFlow version."
             echo ""
-            echo "    Fix: Run this command to install compatible TensorFlow:"
-            echo "    ./scripts/fix_tensorflow_qemu.sh"
+            echo "    Debug info:"
+            echo "    - IS_QEMU: $IS_QEMU"
+            echo "    - HAS_NVIDIA_GPU: $HAS_NVIDIA_GPU"
+            echo "    - TENSORFLOW_TYPE: $TENSORFLOW_TYPE"
             echo ""
-            if [ "$IS_QEMU" = true ]; then
-                echo "    (This is expected on QEMU virtual CPUs)"
-            fi
+            echo "    Please report this issue with the above info."
             exit 1
         elif [ $EXIT_CODE -eq 124 ]; then
             echo "⚠️  CLI verification timed out (>90s)."
@@ -343,8 +418,10 @@ else
             echo "    Try running manually: $POETRY_CMD run bacterial-gan --help"
         else
             echo "❌ CLI check failed with exit code $EXIT_CODE."
-            echo "    Try running manually to see the error:"
-            echo "    $POETRY_CMD run bacterial-gan --help"
+            echo "    Output:"
+            echo "$CLI_OUTPUT" | head -20
+            echo ""
+            echo "    Try running manually: $POETRY_CMD run bacterial-gan --help"
             exit 1
         fi
     fi
@@ -355,29 +432,52 @@ echo "============================================="
 echo "Setup Complete!"
 echo "============================================="
 echo ""
-echo "Installed:"
-echo "  ✅ pyenv (Python version manager)"
-echo "  ✅ Python $REQUIRED_PYTHON_VERSION (via pyenv)"
-echo "  ✅ Poetry dependency manager"
-echo "  ✅ Python packages (TensorFlow, etc.)"
+echo "✅ Installed Components:"
+echo "  • pyenv (Python version manager)"
+echo "  • Python $REQUIRED_PYTHON_VERSION"
+echo "  • Poetry dependency manager"
+echo "  • TensorFlow: $TENSORFLOW_TYPE"
+
+if [ "$HAS_NVIDIA_GPU" = true ]; then
+    echo "  • GPU: $GPU_NAME (CUDA $CUDA_VERSION)"
+elif [ "$IS_QEMU" = true ]; then
+    echo "  • CPU: QEMU Virtual CPU (no GPU)"
+fi
+
 echo ""
 echo "⚠️  IMPORTANT: If this is your first time installing pyenv:"
-echo "   Add pyenv to your shell config (~/.bashrc or ~/.zshrc):"
+echo "   Add to ~/.bashrc (or ~/.zshrc):"
+echo ""
 echo "   export PYENV_ROOT=\"\$HOME/.pyenv\""
 echo "   command -v pyenv >/dev/null || export PATH=\"\$PYENV_ROOT/bin:\$PATH\""
 echo "   eval \"\$(pyenv init -)\""
 echo ""
-echo "   Then reload your shell: source ~/.bashrc (or source ~/.zshrc)"
+echo "   Then reload: source ~/.bashrc"
 echo ""
-echo "Next steps:"
+echo "📋 Next Steps:"
 echo "  1. Add dataset to: data/01_raw/"
-if [ -f ".venv/bin/bacterial-gan" ]; then
-    echo "  2. Start training: .venv/bin/bacterial-gan train"
-    echo "     Or activate venv: source .venv/bin/activate && bacterial-gan train"
-else
-    echo "  2. Start training: $POETRY_CMD run bacterial-gan train"
-fi
+echo "  2. Start training: .venv/bin/bacterial-gan train"
+echo "     (or: source .venv/bin/activate && bacterial-gan train)"
 echo ""
-echo "To clean up everything later:"
-echo "  ./scripts/cleanup.sh"
+
+if [ "$HAS_NVIDIA_GPU" = true ]; then
+    echo "💡 GPU Training Tips:"
+    echo "  • A2000 (12GB) recommended batch_size: 16-24"
+    echo "  • Training speed: ~2-5 sec/epoch"
+    echo "  • Set use_simplified: false in configs/config.yaml"
+    echo ""
+elif [ "$IS_QEMU" = true ]; then
+    echo "⚠️  CPU Training Warning:"
+    echo "  • Training will be 10-100x slower than GPU"
+    echo "  • Recommended for testing/development only"
+    echo "  • Consider using a server with real GPU for production"
+    echo ""
+fi
+
+echo "🛠️  Troubleshooting:"
+if [ "$HAS_NVIDIA_GPU" = true ]; then
+    echo "  • Verify GPU: .venv/bin/python -c 'import tensorflow as tf; print(tf.config.list_physical_devices(\"GPU\"))'"
+fi
+echo "  • Check CLI: .venv/bin/bacterial-gan --help"
+echo "  • Clean up: ./scripts/cleanup.sh"
 echo ""
