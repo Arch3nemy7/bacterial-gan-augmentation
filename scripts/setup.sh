@@ -31,6 +31,16 @@ else
 fi
 
 echo "Detected OS: $OS"
+
+# Check if running on QEMU virtual CPU
+IS_QEMU=false
+if grep -q "QEMU" /proc/cpuinfo 2>/dev/null; then
+    IS_QEMU=true
+    echo "⚠️  QEMU Virtual CPU detected!"
+    echo "    TensorFlow may not work with pre-built wheels."
+    echo "    If you get 'Illegal instruction' errors, run:"
+    echo "    ./scripts/fix_tensorflow_qemu.sh"
+fi
 echo ""
 
 # ============================================
@@ -280,11 +290,24 @@ echo "✅ Verifying CLI..."
 echo "   (This may take 15-30 seconds on virtual CPUs due to TensorFlow import...)"
 if [ -f ".venv/bin/bacterial-gan" ]; then
     # Use venv CLI directly with increased timeout
-    if timeout 90s .venv/bin/bacterial-gan --help &> /dev/null; then
+    CLI_OUTPUT=$(timeout 90s .venv/bin/bacterial-gan --help 2>&1) && CLI_SUCCESS=true || CLI_SUCCESS=false
+    EXIT_CODE=$?
+
+    if [ "$CLI_SUCCESS" = true ]; then
         echo "✅ 'bacterial-gan' CLI is ready."
     else
-        EXIT_CODE=$?
-        if [ $EXIT_CODE -eq 124 ]; then
+        if [ $EXIT_CODE -eq 132 ] || echo "$CLI_OUTPUT" | grep -q "Illegal instruction"; then
+            echo "❌ Illegal instruction error detected!"
+            echo "    Your CPU doesn't support the instructions TensorFlow was compiled with."
+            echo ""
+            echo "    Fix: Run this command to install compatible TensorFlow:"
+            echo "    ./scripts/fix_tensorflow_qemu.sh"
+            echo ""
+            if [ "$IS_QEMU" = true ]; then
+                echo "    (This is expected on QEMU virtual CPUs)"
+            fi
+            exit 1
+        elif [ $EXIT_CODE -eq 124 ]; then
             echo "⚠️  CLI verification timed out (>90s)."
             echo "    This is common on virtual CPUs. The CLI should still work, just slowly."
             echo "    Try running manually: .venv/bin/bacterial-gan --help"
@@ -297,11 +320,24 @@ if [ -f ".venv/bin/bacterial-gan" ]; then
     fi
 else
     # Use Poetry with increased timeout
-    if timeout 90s $POETRY_CMD run bacterial-gan --help &> /dev/null; then
+    CLI_OUTPUT=$(timeout 90s $POETRY_CMD run bacterial-gan --help 2>&1) && CLI_SUCCESS=true || CLI_SUCCESS=false
+    EXIT_CODE=$?
+
+    if [ "$CLI_SUCCESS" = true ]; then
         echo "✅ 'bacterial-gan' CLI is ready."
     else
-        EXIT_CODE=$?
-        if [ $EXIT_CODE -eq 124 ]; then
+        if [ $EXIT_CODE -eq 132 ] || echo "$CLI_OUTPUT" | grep -q "Illegal instruction"; then
+            echo "❌ Illegal instruction error detected!"
+            echo "    Your CPU doesn't support the instructions TensorFlow was compiled with."
+            echo ""
+            echo "    Fix: Run this command to install compatible TensorFlow:"
+            echo "    ./scripts/fix_tensorflow_qemu.sh"
+            echo ""
+            if [ "$IS_QEMU" = true ]; then
+                echo "    (This is expected on QEMU virtual CPUs)"
+            fi
+            exit 1
+        elif [ $EXIT_CODE -eq 124 ]; then
             echo "⚠️  CLI verification timed out (>90s)."
             echo "    This is common on virtual CPUs. The CLI should still work, just slowly."
             echo "    Try running manually: $POETRY_CMD run bacterial-gan --help"
