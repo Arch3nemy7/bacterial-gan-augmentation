@@ -264,7 +264,8 @@ else
 fi
 
 # Decide which TensorFlow version to install
-if [ "$HAS_NVIDIA_GPU" = true ]; then
+# IMPORTANT: QEMU CPU cannot run AVX2 instructions even if GPU is present!
+if [ "$HAS_NVIDIA_GPU" = true ] && [ "$IS_QEMU" = false ]; then
     echo ""
     echo "📦 Installing TensorFlow with GPU support..."
     echo "   This includes CUDA and cuDNN libraries (~500MB download)"
@@ -305,7 +306,14 @@ if [ "$HAS_NVIDIA_GPU" = true ]; then
 
 elif [ "$IS_QEMU" = true ]; then
     echo ""
-    echo "⚠️  QEMU Virtual CPU detected without GPU"
+    if [ "$HAS_NVIDIA_GPU" = true ]; then
+        echo "⚠️  QEMU Virtual CPU detected WITH GPU: $GPU_NAME"
+        echo "    QEMU CPUs cannot run TensorFlow's AVX2 instructions"
+        echo "    Installing CPU-only TensorFlow (GPU will NOT be used)"
+        echo "    Recommendation: Use a server with real CPU for GPU training"
+    else
+        echo "⚠️  QEMU Virtual CPU detected without GPU"
+    fi
     echo "📦 Installing CPU-only TensorFlow (compatible with QEMU)..."
     echo "   Target: tensorflow-cpu==2.17.0"
 
@@ -455,8 +463,11 @@ echo "  • Python $REQUIRED_PYTHON_VERSION"
 echo "  • Poetry dependency manager"
 echo "  • TensorFlow: $TENSORFLOW_TYPE"
 
-if [ "$HAS_NVIDIA_GPU" = true ]; then
+if [ "$HAS_NVIDIA_GPU" = true ] && [ "$IS_QEMU" = false ]; then
     echo "  • GPU: $GPU_NAME (CUDA $CUDA_VERSION)"
+elif [ "$IS_QEMU" = true ] && [ "$HAS_NVIDIA_GPU" = true ]; then
+    echo "  • CPU: QEMU Virtual CPU"
+    echo "  • GPU: $GPU_NAME (⚠️  NOT USABLE - QEMU limitation)"
 elif [ "$IS_QEMU" = true ]; then
     echo "  • CPU: QEMU Virtual CPU (no GPU)"
 fi
@@ -477,11 +488,23 @@ echo "  2. Start training: .venv/bin/bacterial-gan train"
 echo "     (or: source .venv/bin/activate && bacterial-gan train)"
 echo ""
 
-if [ "$HAS_NVIDIA_GPU" = true ]; then
+if [ "$HAS_NVIDIA_GPU" = true ] && [ "$IS_QEMU" = false ]; then
     echo "💡 GPU Training Tips:"
     echo "  • A2000 (12GB) recommended batch_size: 16-24"
     echo "  • Training speed: ~2-5 sec/epoch"
     echo "  • Set use_simplified: false in configs/config.yaml"
+    echo ""
+elif [ "$IS_QEMU" = true ] && [ "$HAS_NVIDIA_GPU" = true ]; then
+    echo "❌ CRITICAL LIMITATION:"
+    echo "  • You have NVIDIA $GPU_NAME but QEMU virtual CPU"
+    echo "  • QEMU CPUs cannot run TensorFlow (missing AVX2 instructions)"
+    echo "  • GPU is present but CANNOT be used"
+    echo "  • Training will be 10-100x slower (CPU-only)"
+    echo ""
+    echo "🔧 Solutions:"
+    echo "  1. Switch to a VPS with REAL CPU (not QEMU) - enables GPU"
+    echo "  2. Use Docker with --device=/dev/kvm for better CPU emulation"
+    echo "  3. Accept CPU-only training (very slow)"
     echo ""
 elif [ "$IS_QEMU" = true ]; then
     echo "⚠️  CPU Training Warning:"
